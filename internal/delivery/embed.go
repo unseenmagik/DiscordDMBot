@@ -45,6 +45,8 @@ func embedColor(cfg *config.Config, deliveryConfig config.ScheduledDelivery) (in
 		return config.ParseHexColor(cfg.Embed.InitialColor)
 	case "final":
 		return config.ParseHexColor(cfg.Embed.FinalColor)
+	case "due":
+		return config.ParseHexColor(cfg.Embed.DueColor)
 	case "late":
 		return config.ParseHexColor(cfg.Embed.LateColor)
 	}

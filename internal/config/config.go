@@ -44,6 +44,7 @@ type Embed struct {
 	Color               string `toml:"color"`
 	InitialColor        string `toml:"initial_color"`
 	FinalColor          string `toml:"final_color"`
+	DueColor            string `toml:"due_color"`
 	LateColor           string `toml:"late_color"`
 	OneOffColor         string `toml:"one_off_color"`
 }
@@ -135,6 +136,7 @@ func (c *Config) Validate() error {
 	c.Embed.Color = strings.TrimSpace(c.Embed.Color)
 	c.Embed.InitialColor = strings.TrimSpace(c.Embed.InitialColor)
 	c.Embed.FinalColor = strings.TrimSpace(c.Embed.FinalColor)
+	c.Embed.DueColor = strings.TrimSpace(c.Embed.DueColor)
 	c.Embed.LateColor = strings.TrimSpace(c.Embed.LateColor)
 	c.Embed.OneOffColor = strings.TrimSpace(c.Embed.OneOffColor)
 	c.Discord.AdminChannelID = strings.TrimSpace(c.Discord.AdminChannelID)
@@ -208,6 +210,9 @@ func (c *Config) Validate() error {
 	if c.Embed.FinalColor == "" {
 		c.Embed.FinalColor = "#DD6B20"
 	}
+	if c.Embed.DueColor == "" {
+		c.Embed.DueColor = c.Embed.Color
+	}
 	if c.Embed.LateColor == "" {
 		c.Embed.LateColor = "#C53030"
 	}
@@ -223,6 +228,9 @@ func (c *Config) Validate() error {
 	}
 	if _, err := ParseHexColor(c.Embed.FinalColor); err != nil {
 		return fmt.Errorf("invalid embed.final_color: %w", err)
+	}
+	if _, err := ParseHexColor(c.Embed.DueColor); err != nil {
+		return fmt.Errorf("invalid embed.due_color: %w", err)
 	}
 	if _, err := ParseHexColor(c.Embed.LateColor); err != nil {
 		return fmt.Errorf("invalid embed.late_color: %w", err)

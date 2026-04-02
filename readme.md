@@ -49,12 +49,15 @@ send_missed_deliveries = false
 state_path = "data/delivery-state.json"
 
 [embed]
+# Global default embed styling and template.
+# This controls presentation, not scheduling.
 title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
+due_color = "#2B6CB0"
 late_color = "#C53030"
 one_off_color = "#C53030"
 
@@ -81,6 +84,14 @@ title = "MPMaps Final Payment Reminder"
 days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
+
+[[deliveries.reminders]]
+id = "due"
+name = "Due Reminder"
+title = "MPMaps Payment Due Today"
+days_before_due = 0
+time = "09:00"
+message = "Hello {{user}},\n\nYour payment is due today.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 
 [[deliveries.reminders]]
 id = "late"
@@ -113,10 +124,32 @@ For due-date reminder flows, each `[[deliveries]]` can contain:
 - optional `frequency`
 - one or more `[[deliveries.reminders]]`
 
-Each `[[deliveries.reminders]]` entry belongs to the `[[deliveries]]` block directly above it and uses that parent delivery's `user_id`, `value`, `due_date`, and `due_time`.
+`[embed]` is the global presentation layer:
+- default title
+- default description template
+- footer
+- default and reminder-specific colors
+
+`[[deliveries]]` is the parent payment/schedule record:
+- user
+- value
+- due date
+- due time
+- frequency
+
+`[[deliveries.reminders]]` are the actual messages that get sent. Each one belongs to the `[[deliveries]]` block directly above it and uses that parent delivery's `user_id`, `value`, `due_date`, and `due_time`.
 
 Each reminder can also set an optional `title` to override the global `[embed].title` for that specific send.
 If you define a reminder with `id = "late"`, it is treated as a manual-only reminder and is not scheduled automatically.
+
+Recommended reminder layout:
+
+- `id = "initial"` with `days_before_due = 3`
+- `id = "final"` with `days_before_due = 1`
+- `id = "due"` with `days_before_due = 0`
+- `id = "late"` as a manual-only reminder
+
+The `Late reminder` button is attached to the admin post for the `due` reminder, not the `final` reminder.
 
 `frequency` is optional, but when you use it the only supported values are:
 
@@ -172,6 +205,7 @@ Reminder embeds also get automatic color coding from config:
 
 - reminder `id = "initial"` uses `embed.initial_color`
 - reminder `id = "final"` uses `embed.final_color`
+- reminder `id = "due"` uses `embed.due_color`
 - reminder `id = "late"` uses `embed.late_color`
 - top-level one-off `[[deliveries]]` entries use `embed.one_off_color`
 - anything else falls back to `embed.color`
@@ -302,7 +336,7 @@ Formats:
 - If a reminder was already delivered once, the scheduler will not send it again while the same state key still exists
 - During testing, reusing the same delivery ID, due date, and reminder ID can make the bot treat a reminder as already sent
 - The bot can also post admin status messages in `discord.admin_channel_id`
-- When a `late` reminder exists and the `final` reminder is sent, the admin message includes a `Late reminder` button
+- When a `late` reminder exists and the `due` reminder is sent, the admin message includes a `Late reminder` button
 - Pressing that button sends the configured `late` reminder once and then disables the button
 
 ## Discord Notes

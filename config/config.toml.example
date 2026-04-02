@@ -27,16 +27,20 @@ state_path = "data/delivery-state.json"
 
 [embed]
 # Shared embed styling used for reminder sends.
+# This section controls the default look of the embeds the bot sends.
+# It does not schedule messages by itself.
 title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#C53030"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
+due_color = "#C53030"
 late_color = "#C53030"
 one_off_color = "#b630c5"
 
 # Each [[deliveries]] block is one payment/reminder group for one user.
+# Think of this as the parent payment record, not the actual messages.
 # The user_id, due_date, due_time, frequency, and value below apply to every
 # [[deliveries.reminders]] block that follows until the next [[deliveries]].
 # Available frequency values: "once", "daily", "weekly", "bi-weekly", "monthly"
@@ -67,8 +71,19 @@ days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
 
+# This is the on-the-day reminder and is the admin post that gets the
+# "Late reminder" button when a matching `late` reminder exists.
+[[deliveries.reminders]]
+id = "due"
+name = "Due Reminder"
+title = "MPMaps Payment Due Today"
+days_before_due = 0
+time = "09:00"
+message = "Hello {{user}},\n\nYour payment is due today.\n\nValue: **{{value}}**\nDue: **{{due}}**"
+
 # A manual-only late reminder. This is not scheduled automatically.
-# The bot can send it from the admin channel when the "Late reminder" button is used.
+# The bot can send it from the admin channel when the "Late reminder" button is used
+# on the `due` reminder admin post.
 [[deliveries.reminders]]
 id = "late"
 name = "Late Reminder"

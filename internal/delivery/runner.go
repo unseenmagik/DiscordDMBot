@@ -322,7 +322,7 @@ func statusEmbed(title, description string, color int) (*discordgo.MessageEmbed,
 }
 
 func shouldOfferLateReminder(deliveryGroup config.Delivery, deliveryConfig config.ScheduledDelivery) bool {
-	if deliveryConfig.ReminderID != "final" {
+	if deliveryConfig.ReminderID != "due" {
 		return false
 	}
 	if strings.TrimSpace(deliveryConfig.DeliveryID) == "" {
