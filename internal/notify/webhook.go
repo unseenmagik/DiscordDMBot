@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -73,7 +72,7 @@ func (w *DiscordWebhook) Send(title, description string, color int, fields []Fie
 	}
 
 	body, err := json.Marshal(payload{
-		Username: "Discord DM Bot",
+		Username: "DM Reminder Bot",
 		Embeds: []embed{
 			{
 				Title:       trim(title, 256),
@@ -95,11 +94,7 @@ func (w *DiscordWebhook) Send(title, description string, color int, fields []Fie
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		if len(body) == 0 {
-			return fmt.Errorf("webhook returned status %s", resp.Status)
-		}
-		return fmt.Errorf("webhook returned status %s: %s", resp.Status, string(body))
+		return fmt.Errorf("webhook returned status %s", resp.Status)
 	}
 
 	return nil

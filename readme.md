@@ -271,7 +271,6 @@ Formats:
 - Sent reminders are tracked in `data/delivery-state.json`
 - If a reminder was already delivered once, the scheduler will not send it again while the same state key still exists
 - During testing, reusing the same delivery ID, due date, and reminder ID can make the bot treat a reminder as already sent
-- The log files now include explicit reasons when a reminder is skipped because it was already delivered or because the send window was missed
 - Optional webhook notifications can also report `sent`, `skipped`, and `failed` scheduler events to a Discord channel
 
 ## Discord Notes

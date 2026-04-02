@@ -18,7 +18,6 @@ type Runner struct {
 	configStore *config.Store
 	store       *state.Store
 	logger      *log.Logger
-	skipReasons map[string]string
 	notifier    *notify.DiscordWebhook
 	notifyState map[string]string
 }
@@ -29,7 +28,6 @@ func NewRunner(session *discordgo.Session, configStore *config.Store, statePath 
 		configStore: configStore,
 		store:       state.NewStore(statePath),
 		logger:      logger,
-		skipReasons: make(map[string]string),
 		notifier:    notifier,
 		notifyState: make(map[string]string),
 	}
@@ -80,15 +78,13 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 			stateKey := scheduledDelivery.StateKey
 			if record, alreadyDelivered := fileState.Deliveries[stateKey]; alreadyDelivered {
 				if !now.Before(scheduledDelivery.ScheduledAt) {
-					reason := fmt.Sprintf(
+					r.notifySkipped(cfg, scheduledDelivery, fmt.Sprintf(
 						"skip delivery=%s user=%s because it is already marked delivered; delivered_at_utc=%s due=%s",
 						stateKey,
 						scheduledDelivery.UserID,
 						record.DeliveredAtUTC,
 						scheduledDelivery.ScheduledAt.Format(time.RFC3339),
-					)
-					r.logSkipReasonOnce(stateKey, reason)
-					r.notifySkipped(cfg, scheduledDelivery, reason)
+					))
 				}
 				continue
 			}
@@ -100,16 +96,14 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 			}
 
 			if !cfg.Runtime.SendMissedDeliveries && now.After(scheduledAt.Add(sendWindow)) {
-				reason := fmt.Sprintf(
+				r.notifySkipped(cfg, scheduledDelivery, fmt.Sprintf(
 					"skip delivery=%s user=%s because the send window expired; scheduled_at=%s now=%s window=%s send_missed_deliveries=false",
 					stateKey,
 					scheduledDelivery.UserID,
 					scheduledAt.Format(time.RFC3339),
 					now.Format(time.RFC3339),
 					sendWindow,
-				)
-				r.logSkipReasonOnce(stateKey, reason)
-				r.notifySkipped(cfg, scheduledDelivery, reason)
+				))
 				continue
 			}
 
@@ -143,7 +137,6 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 				return fmt.Errorf("persist delivery state for %s: %w", stateKey, err)
 			}
 
-			delete(r.skipReasons, stateKey)
 			delete(r.notifyState, "skip:"+stateKey)
 			delete(r.notifyState, "fail:"+stateKey)
 			r.logger.Printf("delivered dm to user=%s guild=%s scheduled_at=%s", scheduledDelivery.UserID, guildID, scheduledAt.Format(time.RFC3339))
@@ -170,15 +163,6 @@ func deliverySendWindow(pollIntervalSeconds int) time.Duration {
 	}
 
 	return window
-}
-
-func (r *Runner) logSkipReasonOnce(stateKey, message string) {
-	if previous, exists := r.skipReasons[stateKey]; exists && previous == message {
-		return
-	}
-
-	r.skipReasons[stateKey] = message
-	r.logger.Print(message)
 }
 
 func (r *Runner) notifySent(cfg *config.Config, deliveryConfig config.ScheduledDelivery, guildID string) {
