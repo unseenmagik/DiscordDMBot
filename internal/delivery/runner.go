@@ -191,6 +191,11 @@ func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfi
 		r.logger.Printf("build admin skipped embed failed: %v", err)
 		return
 	}
+	embed, err = admin.CloneEmbedWithColor(embed, "#C53030")
+	if err != nil {
+		r.logger.Printf("recolor admin skipped embed failed: %v", err)
+		return
+	}
 
 	content := fmt.Sprintf("Skipped for %s | Reminder: %s | Due: %s | Reason: already marked delivered at `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), deliveredAtUTC)
 	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
@@ -214,6 +219,11 @@ func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig co
 	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, deliveryConfig.ScheduledAt)
 	if err != nil {
 		r.logger.Printf("build admin skipped embed failed: %v", err)
+		return
+	}
+	embed, err = admin.CloneEmbedWithColor(embed, "#C53030")
+	if err != nil {
+		r.logger.Printf("recolor admin skipped embed failed: %v", err)
 		return
 	}
 

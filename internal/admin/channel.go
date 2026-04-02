@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"discorddmbot/internal/config"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -93,4 +95,19 @@ func StatusEmbed(title, description string, color int) *discordgo.MessageEmbed {
 		Color:       color,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+func CloneEmbedWithColor(embed *discordgo.MessageEmbed, hexColor string) (*discordgo.MessageEmbed, error) {
+	if embed == nil {
+		return nil, nil
+	}
+
+	color, err := config.ParseHexColor(hexColor)
+	if err != nil {
+		return nil, err
+	}
+
+	cloned := *embed
+	cloned.Color = color
+	return &cloned, nil
 }
