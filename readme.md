@@ -94,6 +94,8 @@ For due-date reminder flows, each `[[deliveries]]` can contain:
 - optional `due_time`
 - one or more `[[deliveries.reminders]]`
 
+Each `[[deliveries.reminders]]` entry belongs to the `[[deliveries]]` block directly above it and uses that parent delivery's `user_id`, `value`, `due_date`, and `due_time`.
+
 For a simple one-off send, you can still use:
 
 - `date`

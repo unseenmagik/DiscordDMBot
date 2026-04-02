@@ -1,20 +1,37 @@
 [discord]
+# Discord bot token from the Discord developer portal.
 bot_token = "replace-with-your-bot-token"
+
+# One or more guilds where the bot is allowed to operate.
 guild_ids = ["123456789012345678"]
+
+# Only members with one of these role IDs can use the slash commands.
 allowed_role_ids = ["345678901234567890"]
 
 [runtime]
+# Timezone used when calculating scheduled reminder times.
 timezone = "Europe/London"
+
+# How often the bot checks for due reminders.
 poll_interval_seconds = 15
+
+# If false, old reminders missed during downtime are skipped on restart.
+# If true, the bot will catch up missed reminders after it comes back online.
 send_missed_deliveries = false
+
+# Where delivered reminder state is stored.
 state_path = "data/delivery-state.json"
 
 [embed]
+# Shared embed styling used for reminder sends.
 title = "Scheduled Reminder"
 description_template = "Hello,\n\nThis is your payment reminder for **{{value}}**."
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 
+# Each [[deliveries]] block is one payment/reminder group for one user.
+# The user_id, due_date, due_time, and value below apply to every
+# [[deliveries.reminders]] block that follows until the next [[deliveries]].
 [[deliveries]]
 id = "payment-reminder-001"
 user_id = "123456789012345678"
@@ -22,6 +39,7 @@ due_date = "2026-04-15"
 due_time = "17:00"
 value = "INV-2026-001"
 
+# This reminder belongs to the [[deliveries]] block directly above.
 [[deliveries.reminders]]
 id = "initial"
 name = "Initial Reminder"
@@ -29,6 +47,7 @@ days_before_due = 3
 time = "09:00"
 message = "Hello,\n\nThis is your **initial reminder** that payment **{{value}}** is due on **{{dueDate}}**."
 
+# This reminder also belongs to the same [[deliveries]] block above.
 [[deliveries.reminders]]
 id = "final"
 name = "Final Reminder"
@@ -36,6 +55,8 @@ days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
 
+# Start a new [[deliveries]] block when you want reminders for a different
+# user or a different payment/value.
 [[deliveries]]
 id = "one-off-example"
 user_id = "234567890123456789"
