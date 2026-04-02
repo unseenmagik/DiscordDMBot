@@ -25,7 +25,7 @@ state_path = "data/delivery-state.json"
 [embed]
 # Shared embed styling used for reminder sends.
 title = "Scheduled Reminder"
-description_template = "Hello,\n\nThis is your payment reminder for **{{value}}**."
+description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 
@@ -53,6 +53,7 @@ value = "INV-2026-001"
 [[deliveries.reminders]]
 id = "initial"
 name = "Initial Reminder"
+title = "MPMaps Initial Payment Reminder"
 days_before_due = 3
 time = "09:00"
 message = "Hello,\n\nThis is your **initial reminder** that payment **{{value}}** is due on **{{dueDate}}**."
@@ -61,6 +62,7 @@ message = "Hello,\n\nThis is your **initial reminder** that payment **{{value}}*
 [[deliveries.reminders]]
 id = "final"
 name = "Final Reminder"
+title = "MPMaps Final Payment Reminder"
 days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."

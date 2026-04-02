@@ -49,7 +49,7 @@ state_path = "data/delivery-state.json"
 
 [embed]
 title = "Scheduled Reminder"
-description_template = "Hello,\n\nThis is your payment reminder for **{{value}}**."
+description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 
@@ -70,6 +70,7 @@ value = "INV-2026-001"
 [[deliveries.reminders]]
 id = "initial"
 name = "Initial Reminder"
+title = "MPMaps Initial Payment Reminder"
 days_before_due = 3
 time = "09:00"
 message = "Hello,\n\nThis is your **initial reminder** that payment **{{value}}** is due on **{{dueDate}}**."
@@ -77,6 +78,7 @@ message = "Hello,\n\nThis is your **initial reminder** that payment **{{value}}*
 [[deliveries.reminders]]
 id = "final"
 name = "Final Reminder"
+title = "MPMaps Final Payment Reminder"
 days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
@@ -114,6 +116,8 @@ For due-date reminder flows, each `[[deliveries]]` can contain:
 
 Each `[[deliveries.reminders]]` entry belongs to the `[[deliveries]]` block directly above it and uses that parent delivery's `user_id`, `value`, `due_date`, and `due_time`.
 
+Each reminder can also set an optional `title` to override the global `[embed].title` for that specific send.
+
 `frequency` is optional, but when you use it the only supported values are:
 
 - `once`
@@ -143,12 +147,17 @@ For a simple one-off send, you can still use:
 Supported placeholders in `embed.description_template` and per-delivery `message`:
 
 - `{{value}}`
+- `{{user}}`
+- `{{userMention}}`
 - `{{userId}}`
 - `{{date}}`
 - `{{time}}`
+- `{{due}}`
 - `{{dueDate}}`
 - `{{dueTime}}`
+- `{{reminder}}`
 - `{{reminderName}}`
+- `{{frequency}}`
 - `{{daysBeforeDue}}`
 
 Each DM is sent as an embed with:
@@ -157,8 +166,7 @@ Each DM is sent as an embed with:
 - the configured footer
 - the configured color
 - the bot avatar as the footer icon and thumbnail when available
-- the rendered description
-- automatic `Value` and `Due` fields
+- the rendered description only, so layout stays clean and controlled by your template
 
 Reminder embeds also get automatic color coding by `days_before_due`:
 

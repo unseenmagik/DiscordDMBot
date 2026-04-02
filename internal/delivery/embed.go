@@ -16,44 +16,15 @@ func BuildDeliveryEmbed(session *discordgo.Session, cfg *config.Config, delivery
 	}
 
 	avatarURL := botAvatarURL(session)
-	dueValue := scheduledAt.Format("2006-01-02 15:04 MST")
-	if deliveryConfig.DueDate != "" {
-		dueValue = deliveryConfig.DueDate
-		if deliveryConfig.DueTime != "" {
-			dueValue += " " + deliveryConfig.DueTime
-		}
-	}
-
-	fields := []*discordgo.MessageEmbedField{
-		{
-			Name:   "Value",
-			Value:  deliveryConfig.Value,
-			Inline: true,
-		},
-		{
-			Name:   "Due",
-			Value:  dueValue,
-			Inline: true,
-		},
-	}
-
-	if deliveryConfig.ReminderName != "" {
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Reminder",
-			Value:  deliveryConfig.ReminderName,
-			Inline: true,
-		})
-	}
 
 	embed := &discordgo.MessageEmbed{
-		Title:       cfg.Embed.Title,
+		Title:       deliveryConfig.EmbedTitle(cfg.Embed.Title),
 		Description: message,
 		Color:       color,
 		Footer: &discordgo.MessageEmbedFooter{
 			Text:    cfg.Embed.Footer,
 			IconURL: avatarURL,
 		},
-		Fields:    fields,
 		Thumbnail: &discordgo.MessageEmbedThumbnail{URL: avatarURL},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}

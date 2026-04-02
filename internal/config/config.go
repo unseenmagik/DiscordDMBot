@@ -68,6 +68,7 @@ type Delivery struct {
 type Reminder struct {
 	ID            string `toml:"id,omitempty"`
 	Name          string `toml:"name"`
+	Title         string `toml:"title,omitempty"`
 	DaysBeforeDue int    `toml:"days_before_due"`
 	Time          string `toml:"time"`
 	Message       string `toml:"message"`
@@ -87,6 +88,7 @@ type ScheduledDelivery struct {
 	Frequency     string
 	ReminderID    string
 	ReminderName  string
+	Title         string
 	DaysBeforeDue int
 }
 
@@ -232,6 +234,7 @@ func (c *Config) Validate() error {
 		for reminderIndex := range delivery.Reminders {
 			delivery.Reminders[reminderIndex].ID = strings.TrimSpace(delivery.Reminders[reminderIndex].ID)
 			delivery.Reminders[reminderIndex].Name = strings.TrimSpace(delivery.Reminders[reminderIndex].Name)
+			delivery.Reminders[reminderIndex].Title = strings.TrimSpace(delivery.Reminders[reminderIndex].Title)
 			delivery.Reminders[reminderIndex].Time = strings.TrimSpace(delivery.Reminders[reminderIndex].Time)
 			delivery.Reminders[reminderIndex].Message = strings.TrimSpace(delivery.Reminders[reminderIndex].Message)
 		}
@@ -414,6 +417,7 @@ func (d Delivery) ExpandAt(location *time.Location, reference time.Time) ([]Sche
 				Frequency:     frequency,
 				ReminderID:    reminder.ID,
 				ReminderName:  reminder.Name,
+				Title:         reminder.Title,
 				DaysBeforeDue: reminder.DaysBeforeDue,
 			})
 		}
@@ -484,16 +488,55 @@ func (d ScheduledDelivery) RenderMessage(template string) string {
 
 	replacer := strings.NewReplacer(
 		"{{value}}", d.Value,
+		"{{user}}", d.UserMention(),
+		"{{userMention}}", d.UserMention(),
 		"{{userId}}", d.UserID,
 		"{{date}}", d.Date,
 		"{{time}}", d.Time,
+		"{{due}}", d.DueDisplay(),
 		"{{dueDate}}", d.DueDate,
 		"{{dueTime}}", d.DueTime,
+		"{{reminder}}", d.ReminderName,
 		"{{reminderName}}", d.ReminderName,
+		"{{frequency}}", d.Frequency,
 		"{{daysBeforeDue}}", strconv.Itoa(d.DaysBeforeDue),
 	)
 
 	return replacer.Replace(selectedTemplate)
+}
+
+func (d ScheduledDelivery) EmbedTitle(defaultTitle string) string {
+	if strings.TrimSpace(d.Title) != "" {
+		return d.Title
+	}
+
+	return defaultTitle
+}
+
+func (d ScheduledDelivery) UserMention() string {
+	if strings.TrimSpace(d.UserID) == "" {
+		return ""
+	}
+
+	return "<@" + d.UserID + ">"
+}
+
+func (d ScheduledDelivery) DueDisplay() string {
+	if d.DueDate != "" {
+		if d.DueTime != "" {
+			return d.DueDate + " " + d.DueTime
+		}
+		return d.DueDate
+	}
+
+	if d.Date != "" {
+		if d.Time != "" {
+			return d.Date + " " + d.Time
+		}
+		return d.Date
+	}
+
+	return d.ScheduledAt.Format("2006-01-02 15:04 MST")
 }
 
 func ParseHexColor(value string) (int, error) {
