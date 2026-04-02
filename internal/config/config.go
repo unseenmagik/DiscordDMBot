@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -16,10 +17,11 @@ import (
 var discordUserIDPattern = regexp.MustCompile(`^\d{10,20}$`)
 
 type Config struct {
-	Discord    Discord    `toml:"discord"`
-	Runtime    Runtime    `toml:"runtime"`
-	Embed      Embed      `toml:"embed"`
-	Deliveries []Delivery `toml:"deliveries"`
+	Discord       Discord       `toml:"discord"`
+	Runtime       Runtime       `toml:"runtime"`
+	Embed         Embed         `toml:"embed"`
+	Notifications Notifications `toml:"notifications"`
+	Deliveries    []Delivery    `toml:"deliveries"`
 }
 
 type Discord struct {
@@ -40,6 +42,13 @@ type Embed struct {
 	DescriptionTemplate string `toml:"description_template"`
 	Footer              string `toml:"footer"`
 	Color               string `toml:"color"`
+}
+
+type Notifications struct {
+	DiscordWebhookURL string `toml:"discord_webhook_url"`
+	NotifySent        bool   `toml:"notify_sent"`
+	NotifySkipped     bool   `toml:"notify_skipped"`
+	NotifyFailed      bool   `toml:"notify_failed"`
 }
 
 type Delivery struct {
@@ -123,6 +132,7 @@ func (c *Config) Validate() error {
 	c.Embed.DescriptionTemplate = strings.TrimSpace(c.Embed.DescriptionTemplate)
 	c.Embed.Footer = strings.TrimSpace(c.Embed.Footer)
 	c.Embed.Color = strings.TrimSpace(c.Embed.Color)
+	c.Notifications.DiscordWebhookURL = strings.TrimSpace(c.Notifications.DiscordWebhookURL)
 
 	if c.Runtime.PollIntervalSeconds <= 0 {
 		c.Runtime.PollIntervalSeconds = 15
@@ -190,6 +200,18 @@ func (c *Config) Validate() error {
 
 	if _, err := ParseHexColor(c.Embed.Color); err != nil {
 		return fmt.Errorf("invalid embed.color: %w", err)
+	}
+
+	if c.Notifications.DiscordWebhookURL != "" {
+		parsedURL, err := url.Parse(c.Notifications.DiscordWebhookURL)
+		if err != nil {
+			return fmt.Errorf("invalid notifications.discord_webhook_url: %w", err)
+		}
+		if parsedURL.Scheme != "https" || parsedURL.Host == "" {
+			return fmt.Errorf("notifications.discord_webhook_url must be a valid https URL")
+		}
+	} else if c.Notifications.NotifySent || c.Notifications.NotifySkipped || c.Notifications.NotifyFailed {
+		return fmt.Errorf("notifications.discord_webhook_url is required when notification events are enabled")
 	}
 
 	seen := make(map[string]struct{}, len(c.Deliveries))

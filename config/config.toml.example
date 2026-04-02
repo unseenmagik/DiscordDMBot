@@ -29,6 +29,13 @@ description_template = "Hello,\n\nThis is your payment reminder for **{{value}}*
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 
+[notifications]
+# Optional Discord webhook for scheduler event notifications.
+discord_webhook_url = ""
+notify_sent = false
+notify_skipped = false
+notify_failed = false
+
 # Each [[deliveries]] block is one payment/reminder group for one user.
 # The user_id, due_date, due_time, and value below apply to every
 # [[deliveries.reminders]] block that follows until the next [[deliveries]].

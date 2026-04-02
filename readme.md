@@ -6,6 +6,8 @@ A Go-based Discord bot for sending scheduled DM embeds to specific users, with s
 
 - Sends scheduled Discord DMs as embeds
 - Stores schedules in `config/config.toml`
+- Writes runtime logs to `logs/` with daily rotation
+- Can send sent/skipped/failed scheduler notifications to a Discord webhook
 - Restricts bot usage to configured guilds and roles
 - Exposes admin slash commands for managing sends
 - Runs cleanly as a single compiled binary under PM2
@@ -51,6 +53,12 @@ description_template = "Hello,\n\nThis is your payment reminder for **{{value}}*
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 
+[notifications]
+discord_webhook_url = ""
+notify_sent = false
+notify_skipped = false
+notify_failed = false
+
 [[deliveries]]
 id = "payment-reminder-001"
 user_id = "123456789012345678"
@@ -87,6 +95,14 @@ Set these first:
   How often the bot checks for due deliveries
 - `runtime.send_missed_deliveries`
   If `true`, the bot will send old missed jobs after downtime; if `false`, it only sends inside the live schedule window
+- `notifications.discord_webhook_url`
+  Optional Discord webhook URL for scheduler event notifications
+- `notifications.notify_sent`
+  If `true`, post a webhook message when a scheduled DM is sent
+- `notifications.notify_skipped`
+  If `true`, post a webhook message when a delivery is skipped
+- `notifications.notify_failed`
+  If `true`, post a webhook message when a delivery fails to send
 
 For due-date reminder flows, each `[[deliveries]]` can contain:
 
@@ -193,6 +209,12 @@ pm2 stop discord-dm-bot
 pm2 delete discord-dm-bot
 ```
 
+Log files are also written locally to:
+
+```bash
+logs/discord-dm-bot-YYYY-MM-DD.log
+```
+
 To make PM2 survive reboots:
 
 ```bash
@@ -243,6 +265,14 @@ Formats:
 - The bot only accepts slash commands from configured guilds
 - The bot only allows members with configured role IDs to use commands
 - The bot only sends to users found in at least one configured guild
+
+## Delivery State Notes
+
+- Sent reminders are tracked in `data/delivery-state.json`
+- If a reminder was already delivered once, the scheduler will not send it again while the same state key still exists
+- During testing, reusing the same delivery ID, due date, and reminder ID can make the bot treat a reminder as already sent
+- The log files now include explicit reasons when a reminder is skipped because it was already delivered or because the send window was missed
+- Optional webhook notifications can also report `sent`, `skipped`, and `failed` scheduler events to a Discord channel
 
 ## Discord Notes
 

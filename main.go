@@ -8,10 +8,13 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"discorddmbot/internal/commands"
 	"discorddmbot/internal/config"
 	"discorddmbot/internal/delivery"
+	"discorddmbot/internal/logging"
+	"discorddmbot/internal/notify"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -25,6 +28,17 @@ func main() {
 	if err != nil {
 		logger.Fatalf("load config: %v", err)
 	}
+
+	location, err := time.LoadLocation(appConfig.Runtime.Timezone)
+	if err != nil {
+		logger.Fatalf("load runtime timezone: %v", err)
+	}
+
+	logger, logCloser, err := logging.NewLogger("logs", "discord-dm-bot", location)
+	if err != nil {
+		logger.Fatalf("create logger: %v", err)
+	}
+	defer logCloser.Close()
 
 	session, err := discordgo.New("Bot " + appConfig.Discord.BotToken)
 	if err != nil {
@@ -59,7 +73,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	runner := delivery.NewRunner(session, configStore, appConfig.Runtime.StatePath, logger)
+	webhookNotifier := notify.NewDiscordWebhook(appConfig.Notifications.DiscordWebhookURL, logger)
+	runner := delivery.NewRunner(session, configStore, appConfig.Runtime.StatePath, logger, webhookNotifier)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runner.Run(ctx)

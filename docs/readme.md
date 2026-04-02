@@ -11,8 +11,10 @@ This folder holds the planning and operating notes for the Discord DM bot.
 - The bot reads runtime settings, schedules, and embed styling from `config/config.toml`.
 - The bot token also lives in `config/config.toml`.
 - Delivery history is stored in `data/delivery-state.json`.
+- Runtime logs are written to `logs/` with daily rotation.
 - The scheduler checks for due messages every `runtime.poll_interval_seconds`.
 - Command usage is locked to `discord.guild_ids` and `discord.allowed_role_ids`.
+- Scheduler event notifications can be sent to a Discord webhook from `[notifications]`.
 
 ## Recommended deployment pattern
 
