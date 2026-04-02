@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"discorddmbot/internal/config"
@@ -78,13 +79,7 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 			stateKey := scheduledDelivery.StateKey
 			if record, alreadyDelivered := fileState.Deliveries[stateKey]; alreadyDelivered {
 				if !now.Before(scheduledDelivery.ScheduledAt) {
-					r.notifySkipped(cfg, scheduledDelivery, fmt.Sprintf(
-						"skip delivery=%s user=%s because it is already marked delivered; delivered_at_utc=%s due=%s",
-						stateKey,
-						scheduledDelivery.UserID,
-						record.DeliveredAtUTC,
-						scheduledDelivery.ScheduledAt.Format(time.RFC3339),
-					))
+					r.notifySkippedAlreadyDelivered(cfg, scheduledDelivery, record.DeliveredAtUTC)
 				}
 				continue
 			}
@@ -96,14 +91,7 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 			}
 
 			if !cfg.Runtime.SendMissedDeliveries && now.After(scheduledAt.Add(sendWindow)) {
-				r.notifySkipped(cfg, scheduledDelivery, fmt.Sprintf(
-					"skip delivery=%s user=%s because the send window expired; scheduled_at=%s now=%s window=%s send_missed_deliveries=false",
-					stateKey,
-					scheduledDelivery.UserID,
-					scheduledAt.Format(time.RFC3339),
-					now.Format(time.RFC3339),
-					sendWindow,
-				))
+				r.notifySkippedMissedWindow(cfg, scheduledDelivery, now, sendWindow)
 				continue
 			}
 
@@ -185,12 +173,43 @@ func (r *Runner) notifySent(cfg *config.Config, deliveryConfig config.ScheduledD
 	}
 }
 
-func (r *Runner) notifySkipped(cfg *config.Config, deliveryConfig config.ScheduledDelivery, reason string) {
+func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfig config.ScheduledDelivery, deliveredAtUTC string) {
 	if !cfg.Notifications.NotifySkipped || r.notifier == nil || !r.notifier.Enabled() {
 		return
 	}
 
-	key := "skip:" + deliveryConfig.StateKey
+	key := "skip:already-delivered:" + deliveryConfig.StateKey
+	if _, exists := r.notifyState[key]; exists {
+		return
+	}
+	r.notifyState[key] = deliveredAtUTC
+
+	fields := []notify.Field{
+		{Name: "User", Value: fmt.Sprintf("<@%s>", deliveryConfig.UserID), Inline: true},
+		{Name: "Value", Value: deliveryConfig.Value, Inline: true},
+		{Name: "Due", Value: dueValue(deliveryConfig), Inline: true},
+		{Name: "Reminder", Value: reminderValue(deliveryConfig), Inline: true},
+		{Name: "Delivered At (UTC)", Value: deliveredAtUTC, Inline: true},
+		{Name: "State Key", Value: safeStateKey(deliveryConfig.StateKey), Inline: false},
+	}
+
+	if err := r.notifier.Send(
+		"Reminder Skipped",
+		"This reminder was skipped because it is already marked as delivered in the local delivery state.",
+		0xDD6B20,
+		fields,
+	); err != nil {
+		r.logger.Printf("webhook notify skipped failed: %v", err)
+	}
+}
+
+func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig config.ScheduledDelivery, now time.Time, sendWindow time.Duration) {
+	if !cfg.Notifications.NotifySkipped || r.notifier == nil || !r.notifier.Enabled() {
+		return
+	}
+
+	key := "skip:missed-window:" + deliveryConfig.StateKey
+	reason := now.Format(time.RFC3339)
 	if previous, exists := r.notifyState[key]; exists && previous == reason {
 		return
 	}
@@ -200,13 +219,19 @@ func (r *Runner) notifySkipped(cfg *config.Config, deliveryConfig config.Schedul
 		{Name: "User", Value: fmt.Sprintf("<@%s>", deliveryConfig.UserID), Inline: true},
 		{Name: "Value", Value: deliveryConfig.Value, Inline: true},
 		{Name: "Due", Value: dueValue(deliveryConfig), Inline: true},
-		{Name: "State Key", Value: deliveryConfig.StateKey, Inline: false},
-	}
-	if deliveryConfig.ReminderName != "" {
-		fields = append(fields, notify.Field{Name: "Reminder", Value: deliveryConfig.ReminderName, Inline: true})
+		{Name: "Reminder", Value: reminderValue(deliveryConfig), Inline: true},
+		{Name: "Scheduled At", Value: deliveryConfig.ScheduledAt.Format(time.RFC3339), Inline: true},
+		{Name: "Checked At", Value: now.Format(time.RFC3339), Inline: true},
+		{Name: "Send Window", Value: sendWindow.String(), Inline: true},
+		{Name: "State Key", Value: safeStateKey(deliveryConfig.StateKey), Inline: false},
 	}
 
-	if err := r.notifier.Send("Reminder Skipped", reason, 0xDD6B20, fields); err != nil {
+	if err := r.notifier.Send(
+		"Reminder Skipped",
+		"This reminder was skipped because the allowed send window had already expired and missed deliveries are disabled.",
+		0xDD6B20,
+		fields,
+	); err != nil {
 		r.logger.Printf("webhook notify skipped failed: %v", err)
 	}
 }
@@ -227,10 +252,8 @@ func (r *Runner) notifyFailed(cfg *config.Config, deliveryConfig config.Schedule
 		{Name: "User", Value: fmt.Sprintf("<@%s>", deliveryConfig.UserID), Inline: true},
 		{Name: "Value", Value: deliveryConfig.Value, Inline: true},
 		{Name: "Due", Value: dueValue(deliveryConfig), Inline: true},
-		{Name: "State Key", Value: deliveryConfig.StateKey, Inline: false},
-	}
-	if deliveryConfig.ReminderName != "" {
-		fields = append(fields, notify.Field{Name: "Reminder", Value: deliveryConfig.ReminderName, Inline: true})
+		{Name: "Reminder", Value: reminderValue(deliveryConfig), Inline: true},
+		{Name: "State Key", Value: safeStateKey(deliveryConfig.StateKey), Inline: false},
 	}
 
 	if err := r.notifier.Send("Reminder Send Failed", reason, 0xC53030, fields); err != nil {
@@ -247,4 +270,17 @@ func dueValue(deliveryConfig config.ScheduledDelivery) string {
 	}
 
 	return deliveryConfig.ScheduledAt.Format("2006-01-02 15:04 MST")
+}
+
+func reminderValue(deliveryConfig config.ScheduledDelivery) string {
+	if deliveryConfig.ReminderName == "" {
+		return "Not set"
+	}
+
+	return deliveryConfig.ReminderName
+}
+
+func safeStateKey(value string) string {
+	replacer := strings.NewReplacer(":", ":\u200B", "`", "'")
+	return "`" + replacer.Replace(value) + "`"
 }
