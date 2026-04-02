@@ -64,6 +64,7 @@ id = "payment-reminder-001"
 user_id = "123456789012345678"
 due_date = "2026-04-15"
 due_time = "17:00"
+frequency = "monthly"
 value = "INV-2026-001"
 
 [[deliveries.reminders]]
@@ -108,9 +109,28 @@ For due-date reminder flows, each `[[deliveries]]` can contain:
 
 - `due_date`
 - optional `due_time`
+- optional `frequency`
 - one or more `[[deliveries.reminders]]`
 
 Each `[[deliveries.reminders]]` entry belongs to the `[[deliveries]]` block directly above it and uses that parent delivery's `user_id`, `value`, `due_date`, and `due_time`.
+
+`frequency` is optional, but when you use it the only supported values are:
+
+- `once`
+- `daily`
+- `weekly`
+- `bi-weekly`
+- `monthly`
+
+If `frequency` is omitted, it defaults to `once`. The `due_date` acts as the anchor date for recurring schedules.
+
+Example values:
+
+- `frequency = "once"` for a one-off due date
+- `frequency = "daily"` for a daily repeating due date
+- `frequency = "weekly"` for a weekly repeating due date
+- `frequency = "bi-weekly"` for every 2 weeks
+- `frequency = "monthly"` for monthly repeats anchored to the original `due_date`
 
 For a simple one-off send, you can still use:
 
@@ -239,7 +259,7 @@ pm2 restart discord-dm-bot
 The bot registers these slash commands in the configured guilds:
 
 - `/send-now user value [due_date] [due_time] [message]`
-- `/schedule-add user due_date value initial_time initial_message final_time final_message [due_time] [initial_days_before] [final_days_before] [id]`
+- `/schedule-add user due_date value initial_time initial_message final_time final_message [frequency] [due_time] [initial_days_before] [final_days_before] [id]`
 - `/schedule-view`
 
 `/send-now` can optionally include a due date and due time so the DM embed shows the payment due value instead of the current send timestamp.
@@ -252,6 +272,7 @@ The bot registers these slash commands in the configured guilds:
 Formats:
 
 - `due_date`: `YYYY-MM-DD`
+- `frequency`: `once`, `daily`, `weekly`, `bi-weekly`, or `monthly`
 - `due_time`: optional `HH:MM` using 24-hour time
 - `initial_time`: `HH:MM`
 - `final_time`: `HH:MM`

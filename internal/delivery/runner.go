@@ -69,7 +69,7 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 	now := time.Now().In(location)
 	sendWindow := deliverySendWindow(cfg.Runtime.PollIntervalSeconds)
 	for _, deliveryConfig := range cfg.Deliveries {
-		scheduledDeliveries, err := deliveryConfig.Expand(location)
+		scheduledDeliveries, err := deliveryConfig.ExpandAt(location, now)
 		if err != nil {
 			r.logger.Printf("skip invalid delivery expansion id=%s user=%s: %v", deliveryConfig.ID, deliveryConfig.UserID, err)
 			continue

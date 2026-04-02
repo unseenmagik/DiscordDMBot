@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,7 @@ type Delivery struct {
 	Value     string     `toml:"value"`
 	DueDate   string     `toml:"due_date"`
 	DueTime   string     `toml:"due_time"`
+	Frequency string     `toml:"frequency,omitempty"`
 	Reminders []Reminder `toml:"reminders"`
 }
 
@@ -82,6 +84,7 @@ type ScheduledDelivery struct {
 	Time          string
 	DueDate       string
 	DueTime       string
+	Frequency     string
 	ReminderID    string
 	ReminderName  string
 	DaysBeforeDue int
@@ -225,6 +228,7 @@ func (c *Config) Validate() error {
 		delivery.Value = strings.TrimSpace(delivery.Value)
 		delivery.DueDate = strings.TrimSpace(delivery.DueDate)
 		delivery.DueTime = strings.TrimSpace(delivery.DueTime)
+		delivery.Frequency = normalizeFrequency(delivery.Frequency)
 		for reminderIndex := range delivery.Reminders {
 			delivery.Reminders[reminderIndex].ID = strings.TrimSpace(delivery.Reminders[reminderIndex].ID)
 			delivery.Reminders[reminderIndex].Name = strings.TrimSpace(delivery.Reminders[reminderIndex].Name)
@@ -243,7 +247,7 @@ func (c *Config) Validate() error {
 		}
 
 		isLegacySchedule := delivery.Date != "" || delivery.Time != "" || delivery.Message != ""
-		isReminderSchedule := delivery.DueDate != "" || delivery.DueTime != "" || len(delivery.Reminders) > 0
+		isReminderSchedule := delivery.DueDate != "" || delivery.DueTime != "" || delivery.Frequency != "" || len(delivery.Reminders) > 0
 
 		if isLegacySchedule && isReminderSchedule {
 			return fmt.Errorf("deliveries[%d] must use either direct date/time scheduling or due_date/reminders, not both", index)
@@ -254,6 +258,9 @@ func (c *Config) Validate() error {
 		}
 
 		if isLegacySchedule {
+			if delivery.Frequency != "" {
+				return fmt.Errorf("deliveries[%d].frequency can only be used with due_date/reminders schedules", index)
+			}
 			if delivery.Date == "" {
 				return fmt.Errorf("deliveries[%d].date is required", index)
 			}
@@ -272,6 +279,9 @@ func (c *Config) Validate() error {
 		if isReminderSchedule {
 			if delivery.DueDate == "" {
 				return fmt.Errorf("deliveries[%d].due_date is required", index)
+			}
+			if !isValidFrequency(delivery.normalizedFrequency()) {
+				return fmt.Errorf("deliveries[%d].frequency must be one of once, daily, weekly, bi-weekly, or monthly", index)
 			}
 			if delivery.DueTime != "" {
 				if _, err := time.ParseInLocation("15:04", delivery.DueTime, location); err != nil {
@@ -347,6 +357,10 @@ func (d Delivery) StateKey() string {
 }
 
 func (d Delivery) Expand(location *time.Location) ([]ScheduledDelivery, error) {
+	return d.ExpandAt(location, time.Now().In(location))
+}
+
+func (d Delivery) ExpandAt(location *time.Location, reference time.Time) ([]ScheduledDelivery, error) {
 	if len(d.Reminders) == 0 && d.DueDate == "" && d.DueTime == "" {
 		scheduledAt, err := d.ScheduledAt(location)
 		if err != nil {
@@ -367,39 +381,66 @@ func (d Delivery) Expand(location *time.Location) ([]ScheduledDelivery, error) {
 		}, nil
 	}
 
-	scheduledDeliveries := make([]ScheduledDelivery, 0, len(d.Reminders))
-	for _, reminder := range d.Reminders {
-		scheduledAt, err := reminder.ScheduledAt(d.DueDate, location)
-		if err != nil {
-			return nil, err
-		}
-
-		scheduledDeliveries = append(scheduledDeliveries, ScheduledDelivery{
-			StateKey:      d.ReminderStateKey(reminder),
-			DeliveryID:    d.ID,
-			UserID:        d.UserID,
-			Value:         d.Value,
-			Message:       reminder.Message,
-			ScheduledAt:   scheduledAt,
-			Date:          scheduledAt.Format("2006-01-02"),
-			Time:          scheduledAt.Format("15:04"),
-			DueDate:       d.DueDate,
-			DueTime:       d.DueTime,
-			ReminderID:    reminder.ID,
-			ReminderName:  reminder.Name,
-			DaysBeforeDue: reminder.DaysBeforeDue,
-		})
+	occurrenceDueDates, err := d.occurrenceDueDates(location, reference)
+	if err != nil {
+		return nil, err
 	}
+
+	scheduledDeliveries := make([]ScheduledDelivery, 0, len(occurrenceDueDates)*len(d.Reminders))
+	frequency := d.normalizedFrequency()
+	if frequency == "" {
+		frequency = "once"
+	}
+
+	for _, occurrenceDueDate := range occurrenceDueDates {
+		formattedDueDate := occurrenceDueDate.Format("2006-01-02")
+		for _, reminder := range d.Reminders {
+			scheduledAt, err := reminder.ScheduledAt(formattedDueDate, location)
+			if err != nil {
+				return nil, err
+			}
+
+			scheduledDeliveries = append(scheduledDeliveries, ScheduledDelivery{
+				StateKey:      d.ReminderStateKey(reminder, formattedDueDate),
+				DeliveryID:    d.ID,
+				UserID:        d.UserID,
+				Value:         d.Value,
+				Message:       reminder.Message,
+				ScheduledAt:   scheduledAt,
+				Date:          scheduledAt.Format("2006-01-02"),
+				Time:          scheduledAt.Format("15:04"),
+				DueDate:       formattedDueDate,
+				DueTime:       d.DueTime,
+				Frequency:     frequency,
+				ReminderID:    reminder.ID,
+				ReminderName:  reminder.Name,
+				DaysBeforeDue: reminder.DaysBeforeDue,
+			})
+		}
+	}
+
+	sort.Slice(scheduledDeliveries, func(i, j int) bool {
+		return scheduledDeliveries[i].ScheduledAt.Before(scheduledDeliveries[j].ScheduledAt)
+	})
 
 	return scheduledDeliveries, nil
 }
 
-func (d Delivery) ReminderStateKey(reminder Reminder) string {
-	if d.ID != "" {
-		return "reminder:" + d.ID + ":" + reminder.keyPart()
+func (d Delivery) ReminderStateKey(reminder Reminder, occurrenceDueDate string) string {
+	if d.normalizedFrequency() == "once" {
+		if d.ID != "" {
+			return "reminder:" + d.ID + ":" + reminder.keyPart()
+		}
+
+		sum := sha256.Sum256([]byte(strings.Join([]string{d.UserID, d.DueDate, reminder.keyPart()}, "|")))
+		return "reminder:auto:" + hex.EncodeToString(sum[:])
 	}
 
-	sum := sha256.Sum256([]byte(strings.Join([]string{d.UserID, d.DueDate, reminder.keyPart()}, "|")))
+	if d.ID != "" {
+		return "reminder:" + d.ID + ":" + occurrenceDueDate + ":" + reminder.keyPart()
+	}
+
+	sum := sha256.Sum256([]byte(strings.Join([]string{d.UserID, occurrenceDueDate, reminder.keyPart()}, "|")))
 	return "reminder:auto:" + hex.EncodeToString(sum[:])
 }
 
@@ -467,4 +508,141 @@ func ParseHexColor(value string) (int, error) {
 	}
 
 	return int(parsed[0])<<16 | int(parsed[1])<<8 | int(parsed[2]), nil
+}
+
+func (d Delivery) normalizedFrequency() string {
+	if d.Frequency == "" {
+		return "once"
+	}
+
+	return normalizeFrequency(d.Frequency)
+}
+
+func normalizeFrequency(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "biweekly":
+		return "bi-weekly"
+	default:
+		return normalized
+	}
+}
+
+func isValidFrequency(value string) bool {
+	switch value {
+	case "once", "daily", "weekly", "bi-weekly", "monthly":
+		return true
+	default:
+		return false
+	}
+}
+
+func (d Delivery) occurrenceDueDates(location *time.Location, reference time.Time) ([]time.Time, error) {
+	anchorDate, err := time.ParseInLocation("2006-01-02", d.DueDate, location)
+	if err != nil {
+		return nil, err
+	}
+
+	frequency := d.normalizedFrequency()
+	if frequency == "once" {
+		return []time.Time{anchorDate}, nil
+	}
+
+	referenceDay := startOfDay(reference.In(location))
+	endDay := referenceDay.AddDate(0, 0, d.maxDaysBeforeDue())
+
+	startDay := previousOccurrenceOnOrBefore(anchorDate, frequency, referenceDay)
+	if startDay.IsZero() {
+		startDay = anchorDate
+	}
+
+	occurrences := make([]time.Time, 0, 4)
+	for occurrence := startDay; !occurrence.IsZero() && !occurrence.After(endDay); occurrence = nextOccurrence(anchorDate, occurrence, frequency) {
+		if occurrence.Before(anchorDate) {
+			continue
+		}
+		occurrences = append(occurrences, occurrence)
+	}
+
+	if len(occurrences) == 0 && !anchorDate.After(endDay) {
+		occurrences = append(occurrences, anchorDate)
+	}
+
+	return occurrences, nil
+}
+
+func (d Delivery) maxDaysBeforeDue() int {
+	maxDays := 0
+	for _, reminder := range d.Reminders {
+		if reminder.DaysBeforeDue > maxDays {
+			maxDays = reminder.DaysBeforeDue
+		}
+	}
+
+	return maxDays
+}
+
+func previousOccurrenceOnOrBefore(anchorDate time.Time, frequency string, referenceDay time.Time) time.Time {
+	if referenceDay.Before(anchorDate) {
+		return time.Time{}
+	}
+
+	switch frequency {
+	case "daily":
+		diff := int(referenceDay.Sub(anchorDate).Hours() / 24)
+		return anchorDate.AddDate(0, 0, diff)
+	case "weekly":
+		diff := int(referenceDay.Sub(anchorDate).Hours() / 24)
+		return anchorDate.AddDate(0, 0, (diff/7)*7)
+	case "bi-weekly":
+		diff := int(referenceDay.Sub(anchorDate).Hours() / 24)
+		return anchorDate.AddDate(0, 0, (diff/14)*14)
+	case "monthly":
+		months := (referenceDay.Year()-anchorDate.Year())*12 + int(referenceDay.Month()-anchorDate.Month())
+		occurrence := monthlyOccurrence(anchorDate, months)
+		if occurrence.After(referenceDay) {
+			months--
+		}
+		if months < 0 {
+			return time.Time{}
+		}
+		return monthlyOccurrence(anchorDate, months)
+	default:
+		return anchorDate
+	}
+}
+
+func nextOccurrence(anchorDate, currentOccurrence time.Time, frequency string) time.Time {
+	switch frequency {
+	case "daily":
+		return currentOccurrence.AddDate(0, 0, 1)
+	case "weekly":
+		return currentOccurrence.AddDate(0, 0, 7)
+	case "bi-weekly":
+		return currentOccurrence.AddDate(0, 0, 14)
+	case "monthly":
+		months := (currentOccurrence.Year()-anchorDate.Year())*12 + int(currentOccurrence.Month()-anchorDate.Month()) + 1
+		return monthlyOccurrence(anchorDate, months)
+	default:
+		return time.Time{}
+	}
+}
+
+func monthlyOccurrence(anchorDate time.Time, monthOffset int) time.Time {
+	targetMonth := time.Date(anchorDate.Year(), anchorDate.Month(), 1, 0, 0, 0, 0, anchorDate.Location()).AddDate(0, monthOffset, 0)
+	day := anchorDate.Day()
+	lastDay := daysInMonth(targetMonth.Year(), targetMonth.Month(), anchorDate.Location())
+	if day > lastDay {
+		day = lastDay
+	}
+
+	return time.Date(targetMonth.Year(), targetMonth.Month(), day, 0, 0, 0, 0, anchorDate.Location())
+}
+
+func daysInMonth(year int, month time.Month, location *time.Location) int {
+	return time.Date(year, month+1, 0, 0, 0, 0, 0, location).Day()
+}
+
+func startOfDay(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
 }

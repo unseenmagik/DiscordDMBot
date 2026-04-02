@@ -37,13 +37,16 @@ notify_skipped = false
 notify_failed = false
 
 # Each [[deliveries]] block is one payment/reminder group for one user.
-# The user_id, due_date, due_time, and value below apply to every
+# The user_id, due_date, due_time, frequency, and value below apply to every
 # [[deliveries.reminders]] block that follows until the next [[deliveries]].
+# Available frequency values: "once", "daily", "weekly", "bi-weekly", "monthly"
+# If frequency is omitted, it defaults to "once".
 [[deliveries]]
 id = "payment-reminder-001"
 user_id = "123456789012345678"
 due_date = "2026-04-15"
 due_time = "17:00"
+frequency = "monthly"
 value = "INV-2026-001"
 
 # This reminder belongs to the [[deliveries]] block directly above.
@@ -64,6 +67,8 @@ message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** 
 
 # Start a new [[deliveries]] block when you want reminders for a different
 # user or a different payment/value.
+# Available frequency values for reminder schedules: "once", "daily", "weekly",
+# "bi-weekly", "monthly"
 [[deliveries]]
 id = "one-off-example"
 user_id = "234567890123456789"

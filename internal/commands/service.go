@@ -184,11 +184,12 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 	}
 
 	newDelivery := config.Delivery{
-		ID:      optionalString(options, "id"),
-		UserID:  user.ID,
-		DueDate: strings.TrimSpace(options["due_date"].StringValue()),
-		DueTime: optionalString(options, "due_time"),
-		Value:   strings.TrimSpace(options["value"].StringValue()),
+		ID:        optionalString(options, "id"),
+		UserID:    user.ID,
+		DueDate:   strings.TrimSpace(options["due_date"].StringValue()),
+		DueTime:   optionalString(options, "due_time"),
+		Frequency: optionalString(options, "frequency"),
+		Value:     strings.TrimSpace(options["value"].StringValue()),
 		Reminders: []config.Reminder{
 			{
 				ID:            "initial",
@@ -226,7 +227,7 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 		return err
 	}
 
-	expandedDeliveries, err := newDelivery.Expand(location)
+	expandedDeliveries, err := newDelivery.ExpandAt(location, time.Now().In(location))
 	if err != nil {
 		return err
 	}
@@ -255,6 +256,11 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 				Name:   "Payment Due",
 				Value:  dueLine(newDelivery),
 				Inline: false,
+			},
+			{
+				Name:   "Frequency",
+				Value:  frequencyLabel(newDelivery.Frequency),
+				Inline: true,
 			},
 		},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -387,6 +393,19 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "frequency",
+					Description: "How often the due date repeats. Defaults to once.",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "once", Value: "once"},
+						{Name: "daily", Value: "daily"},
+						{Name: "weekly", Value: "weekly"},
+						{Name: "bi-weekly", Value: "bi-weekly"},
+						{Name: "monthly", Value: "monthly"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "due_time",
 					Description: "Optional payment due time in HH:MM format.",
 					Required:    false,
@@ -432,7 +451,7 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 
 	expandedDeliveries := make([]config.ScheduledDelivery, 0)
 	for _, deliveryConfig := range cfg.Deliveries {
-		scheduledDeliveries, err := deliveryConfig.Expand(location)
+		scheduledDeliveries, err := deliveryConfig.ExpandAt(location, time.Now().In(location))
 		if err != nil {
 			return nil, err
 		}
@@ -517,6 +536,7 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 				fmt.Sprintf("User: <@%s>", deliveryConfig.UserID),
 				fmt.Sprintf("When: %s", deliveryConfig.ScheduledAt.Format("2006-01-02 15:04 MST")),
 				fmt.Sprintf("Value: `%s`", deliveryConfig.Value),
+				fmt.Sprintf("Frequency: %s", frequencyLabel(deliveryConfig.Frequency)),
 				fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
 			}
 			if deliveryConfig.ReminderName != "" {
@@ -639,6 +659,14 @@ func dueLine(deliveryConfig config.Delivery) string {
 	}
 
 	return deliveryConfig.DueDate
+}
+
+func frequencyLabel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "once"
+	}
+
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func (s *Service) memberHasAllowedRole(member *discordgo.Member) bool {

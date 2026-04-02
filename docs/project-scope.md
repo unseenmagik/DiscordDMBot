@@ -16,6 +16,8 @@ Build a production-friendly Discord bot that sends formatted Discord DM reminder
 - Config-driven scheduling with:
   - Discord user ID
   - due date and optional due time
+  - optional recurring frequency
+    supports once, daily, weekly, bi-weekly, and monthly today
   - value/reference
   - per-reminder day offsets
   - per-reminder send times
