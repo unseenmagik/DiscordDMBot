@@ -61,59 +61,80 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 	}
 
 	now := time.Now().In(location)
+	sendWindow := deliverySendWindow(cfg.Runtime.PollIntervalSeconds)
 	for _, deliveryConfig := range cfg.Deliveries {
-		stateKey := deliveryConfig.StateKey()
-		if _, alreadyDelivered := fileState.Deliveries[stateKey]; alreadyDelivered {
-			continue
-		}
-
-		scheduledAt, err := deliveryConfig.ScheduledAt(location)
+		scheduledDeliveries, err := deliveryConfig.Expand(location)
 		if err != nil {
-			r.logger.Printf("skip invalid delivery %s: %v", stateKey, err)
+			r.logger.Printf("skip invalid delivery expansion id=%s user=%s: %v", deliveryConfig.ID, deliveryConfig.UserID, err)
 			continue
 		}
 
-		if now.Before(scheduledAt) {
-			continue
-		}
+		for _, scheduledDelivery := range scheduledDeliveries {
+			stateKey := scheduledDelivery.StateKey
+			if _, alreadyDelivered := fileState.Deliveries[stateKey]; alreadyDelivered {
+				continue
+			}
 
-		message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
-		guildID, err := EnsureUserInAnyGuild(r.session, cfg.Discord.GuildIDs, deliveryConfig.UserID)
-		if err != nil {
-			r.logger.Printf("skip delivery for user=%s because they are not reachable in configured guilds=%v: %v", deliveryConfig.UserID, cfg.Discord.GuildIDs, err)
-			continue
-		}
+			scheduledAt := scheduledDelivery.ScheduledAt
 
-		if err := r.sendDM(cfg, deliveryConfig, message, scheduledAt); err != nil {
-			r.logger.Printf("send failed for user=%s delivery=%s: %v", deliveryConfig.UserID, stateKey, err)
-			continue
-		}
+			if now.Before(scheduledAt) {
+				continue
+			}
 
-		fileState.Deliveries[stateKey] = state.DeliveryRecord{
-			UserID:         deliveryConfig.UserID,
-			Date:           deliveryConfig.Date,
-			Time:           deliveryConfig.Time,
-			Value:          deliveryConfig.Value,
-			Message:        message,
-			DeliveredAtUTC: time.Now().UTC().Format(time.RFC3339),
-		}
+			if !cfg.Runtime.SendMissedDeliveries && now.After(scheduledAt.Add(sendWindow)) {
+				continue
+			}
 
-		if err := r.store.Save(fileState); err != nil {
-			delete(fileState.Deliveries, stateKey)
-			return fmt.Errorf("persist delivery state for %s: %w", stateKey, err)
-		}
+			message := scheduledDelivery.RenderMessage(cfg.Embed.DescriptionTemplate)
+			guildID, err := EnsureUserInAnyGuild(r.session, cfg.Discord.GuildIDs, scheduledDelivery.UserID)
+			if err != nil {
+				r.logger.Printf("skip delivery for user=%s because they are not reachable in configured guilds=%v: %v", scheduledDelivery.UserID, cfg.Discord.GuildIDs, err)
+				continue
+			}
 
-		r.logger.Printf("delivered dm to user=%s guild=%s scheduled_at=%s", deliveryConfig.UserID, guildID, scheduledAt.Format(time.RFC3339))
+			if err := r.sendDM(cfg, scheduledDelivery, message, scheduledAt); err != nil {
+				r.logger.Printf("send failed for user=%s delivery=%s: %v", scheduledDelivery.UserID, stateKey, err)
+				continue
+			}
+
+			fileState.Deliveries[stateKey] = state.DeliveryRecord{
+				UserID:         scheduledDelivery.UserID,
+				Date:           scheduledDelivery.Date,
+				Time:           scheduledDelivery.Time,
+				DueDate:        scheduledDelivery.DueDate,
+				DueTime:        scheduledDelivery.DueTime,
+				ReminderName:   scheduledDelivery.ReminderName,
+				Value:          scheduledDelivery.Value,
+				Message:        message,
+				DeliveredAtUTC: time.Now().UTC().Format(time.RFC3339),
+			}
+
+			if err := r.store.Save(fileState); err != nil {
+				delete(fileState.Deliveries, stateKey)
+				return fmt.Errorf("persist delivery state for %s: %w", stateKey, err)
+			}
+
+			r.logger.Printf("delivered dm to user=%s guild=%s scheduled_at=%s", scheduledDelivery.UserID, guildID, scheduledAt.Format(time.RFC3339))
+		}
 	}
 
 	return nil
 }
 
-func (r *Runner) sendDM(cfg *config.Config, deliveryConfig config.Delivery, message string, scheduledAt time.Time) error {
+func (r *Runner) sendDM(cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) error {
 	embed, err := BuildDeliveryEmbed(cfg, deliveryConfig, message, scheduledAt)
 	if err != nil {
 		return err
 	}
 
 	return SendEmbedDM(r.session, deliveryConfig.UserID, embed)
+}
+
+func deliverySendWindow(pollIntervalSeconds int) time.Duration {
+	window := time.Duration(pollIntervalSeconds) * time.Second
+	if window < time.Minute {
+		return time.Minute
+	}
+
+	return window
 }

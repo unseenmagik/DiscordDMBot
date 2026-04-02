@@ -9,10 +9,44 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.Delivery, message string, scheduledAt time.Time) (*discordgo.MessageEmbed, error) {
+func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) (*discordgo.MessageEmbed, error) {
 	color, err := config.ParseHexColor(cfg.Embed.Color)
 	if err != nil {
 		return nil, fmt.Errorf("parse embed color: %w", err)
+	}
+
+	fields := []*discordgo.MessageEmbedField{
+		{
+			Name:   "Value",
+			Value:  deliveryConfig.Value,
+			Inline: true,
+		},
+		{
+			Name:   "Scheduled For",
+			Value:  scheduledAt.Format("2006-01-02 15:04 MST"),
+			Inline: true,
+		},
+	}
+
+	if deliveryConfig.ReminderName != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Reminder",
+			Value:  deliveryConfig.ReminderName,
+			Inline: true,
+		})
+	}
+
+	if deliveryConfig.DueDate != "" {
+		dueValue := deliveryConfig.DueDate
+		if deliveryConfig.DueTime != "" {
+			dueValue += " " + deliveryConfig.DueTime
+		}
+
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Payment Due",
+			Value:  dueValue,
+			Inline: true,
+		})
 	}
 
 	embed := &discordgo.MessageEmbed{
@@ -22,18 +56,7 @@ func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.Delivery, mess
 		Footer: &discordgo.MessageEmbedFooter{
 			Text: cfg.Embed.Footer,
 		},
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "Value",
-				Value:  deliveryConfig.Value,
-				Inline: true,
-			},
-			{
-				Name:   "Scheduled For",
-				Value:  scheduledAt.Format("2006-01-02 15:04 MST"),
-				Inline: true,
-			},
-		},
+		Fields:    fields,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 

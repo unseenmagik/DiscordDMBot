@@ -6,25 +6,40 @@ allowed_role_ids = ["345678901234567890"]
 [runtime]
 timezone = "Europe/London"
 poll_interval_seconds = 15
+send_missed_deliveries = false
 state_path = "data/delivery-state.json"
 
 [embed]
 title = "Scheduled Reminder"
-description_template = "Hello, this is your scheduled message.\n\nYour value is: **{{value}}**"
+description_template = "Hello,\n\nThis is your payment reminder for **{{value}}**."
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 
 [[deliveries]]
-id = "invoice-reminder-001"
+id = "payment-reminder-001"
 user_id = "123456789012345678"
-date = "2026-04-15"
-time = "09:30"
+due_date = "2026-04-15"
+due_time = "17:00"
 value = "INV-2026-001"
 
+[[deliveries.reminders]]
+id = "initial"
+name = "Initial Reminder"
+days_before_due = 3
+time = "09:00"
+message = "Hello,\n\nThis is your **initial reminder** that payment **{{value}}** is due on **{{dueDate}}**."
+
+[[deliveries.reminders]]
+id = "final"
+name = "Final Reminder"
+days_before_due = 1
+time = "09:00"
+message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
+
 [[deliveries]]
-id = "invoice-reminder-002"
+id = "one-off-example"
 user_id = "234567890123456789"
 date = "2026-04-16"
 time = "14:45"
-message = "Hello,\n\nYour custom scheduled reminder is ready.\n\nReference: **{{value}}**"
+message = "Hello,\n\nYour custom one-off reminder is ready.\n\nReference: **{{value}}**"
 value = "INV-2026-002"

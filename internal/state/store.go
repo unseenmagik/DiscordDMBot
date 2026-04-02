@@ -12,6 +12,9 @@ type DeliveryRecord struct {
 	UserID         string `json:"userId"`
 	Date           string `json:"date"`
 	Time           string `json:"time"`
+	DueDate        string `json:"dueDate,omitempty"`
+	DueTime        string `json:"dueTime,omitempty"`
+	ReminderName   string `json:"reminderName,omitempty"`
 	Value          string `json:"value"`
 	Message        string `json:"message"`
 	DeliveredAtUTC string `json:"deliveredAtUtc"`

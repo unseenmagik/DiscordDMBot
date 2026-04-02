@@ -135,12 +135,13 @@ func (s *Service) handleSendNow(interaction *discordgo.InteractionCreate) error 
 	}
 
 	now := time.Now().In(location)
-	deliveryConfig := config.Delivery{
-		UserID:  user.ID,
-		Date:    now.Format("2006-01-02"),
-		Time:    now.Format("15:04"),
-		Value:   strings.TrimSpace(options["value"].StringValue()),
-		Message: optionalString(options, "message"),
+	deliveryConfig := config.ScheduledDelivery{
+		UserID:      user.ID,
+		Date:        now.Format("2006-01-02"),
+		Time:        now.Format("15:04"),
+		Value:       strings.TrimSpace(options["value"].StringValue()),
+		Message:     optionalString(options, "message"),
+		ScheduledAt: now,
 	}
 
 	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
@@ -167,10 +168,25 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 	newDelivery := config.Delivery{
 		ID:      optionalString(options, "id"),
 		UserID:  user.ID,
-		Date:    strings.TrimSpace(options["date"].StringValue()),
-		Time:    strings.TrimSpace(options["time"].StringValue()),
+		DueDate: strings.TrimSpace(options["due_date"].StringValue()),
+		DueTime: optionalString(options, "due_time"),
 		Value:   strings.TrimSpace(options["value"].StringValue()),
-		Message: optionalString(options, "message"),
+		Reminders: []config.Reminder{
+			{
+				ID:            "initial",
+				Name:          "Initial Reminder",
+				DaysBeforeDue: optionalInt(options, "initial_days_before", 3),
+				Time:          requiredString(options, "initial_time"),
+				Message:       requiredString(options, "initial_message"),
+			},
+			{
+				ID:            "final",
+				Name:          "Final Reminder",
+				DaysBeforeDue: optionalInt(options, "final_days_before", 1),
+				Time:          requiredString(options, "final_time"),
+				Message:       requiredString(options, "final_message"),
+			},
+		},
 	}
 
 	currentConfig, err := s.configStore.Load()
@@ -192,7 +208,7 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 		return err
 	}
 
-	scheduledAt, err := newDelivery.ScheduledAt(location)
+	expandedDeliveries, err := newDelivery.Expand(location)
 	if err != nil {
 		return err
 	}
@@ -204,7 +220,7 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 
 	confirmation := &discordgo.MessageEmbed{
 		Title:       "Schedule Saved",
-		Description: "The new delivery was written to the config file and will be picked up by the scheduler automatically.",
+		Description: "The payment reminder schedule was written to the config file and will be picked up by the scheduler automatically.",
 		Color:       color,
 		Fields: []*discordgo.MessageEmbedField{
 			{
@@ -218,8 +234,8 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 				Inline: true,
 			},
 			{
-				Name:   "When",
-				Value:  scheduledAt.Format("2006-01-02 15:04 MST"),
+				Name:   "Payment Due",
+				Value:  dueLine(newDelivery),
 				Inline: false,
 			},
 		},
@@ -234,11 +250,15 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 		})
 	}
 
-	if newDelivery.Message != "" {
+	for _, scheduledDelivery := range expandedDeliveries {
 		confirmation.Fields = append(confirmation.Fields, &discordgo.MessageEmbedField{
-			Name:   "Custom Description Override",
-			Value:  "Yes",
-			Inline: true,
+			Name: fmt.Sprintf("%s", scheduledDelivery.ReminderName),
+			Value: fmt.Sprintf(
+				"When: %s\nDays Before Due: %d",
+				scheduledDelivery.ScheduledAt.Format("2006-01-02 15:04 MST"),
+				scheduledDelivery.DaysBeforeDue,
+			),
+			Inline: false,
 		})
 	}
 
@@ -290,7 +310,7 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:         commandScheduleAdd,
-			Description:  "Add a scheduled delivery to the config file.",
+			Description:  "Add a payment schedule with initial and final reminders.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
@@ -301,15 +321,15 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "date",
-					Description: "Date in YYYY-MM-DD format.",
+					Name:        "due_date",
+					Description: "Payment due date in YYYY-MM-DD format.",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "time",
-					Description: "Time in HH:MM 24-hour format.",
-					Required:    true,
+					Name:        "due_time",
+					Description: "Optional payment due time in HH:MM format.",
+					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -319,14 +339,44 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "id",
-					Description: "Optional stable delivery ID.",
+					Name:        "initial_time",
+					Description: "Initial reminder time in HH:MM format.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "initial_message",
+					Description: "Message for the initial reminder.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "final_time",
+					Description: "Final reminder time in HH:MM format.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "final_message",
+					Description: "Message for the final reminder.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "initial_days_before",
+					Description: "Days before due date for initial reminder. Default 3.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "final_days_before",
+					Description: "Days before due date for final reminder. Default 1.",
 					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "message",
-					Description: "Optional custom embed description override.",
+					Name:        "id",
+					Description: "Optional stable payment schedule ID.",
 					Required:    false,
 				},
 			},
@@ -350,16 +400,26 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 		return nil, err
 	}
 
+	expandedDeliveries := make([]config.ScheduledDelivery, 0)
+	for _, deliveryConfig := range cfg.Deliveries {
+		scheduledDeliveries, err := deliveryConfig.Expand(location)
+		if err != nil {
+			return nil, err
+		}
+		expandedDeliveries = append(expandedDeliveries, scheduledDeliveries...)
+	}
+
 	embeds := []*discordgo.MessageEmbed{
 		{
 			Title: "Configured Schedule",
 			Description: fmt.Sprintf(
-				"Timezone: `%s`\nPoll Interval: `%d seconds`\nGuild Scope: `%s`\nState Path: `%s`\nTotal Deliveries: `%d`",
+				"Timezone: `%s`\nPoll Interval: `%d seconds`\nGuild Scope: `%s`\nState Path: `%s`\nDelivery Groups: `%d`\nScheduled Sends: `%d`",
 				cfg.Runtime.Timezone,
 				cfg.Runtime.PollIntervalSeconds,
 				strings.Join(cfg.Discord.GuildIDs, ", "),
 				cfg.Runtime.StatePath,
 				len(cfg.Deliveries),
+				len(expandedDeliveries),
 			),
 			Color: color,
 			Fields: []*discordgo.MessageEmbedField{
@@ -393,7 +453,7 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 	}
 
 	maxVisibleDeliveries := (maxScheduleEmbeds - 1) * maxFieldsPerEmbed
-	visibleDeliveries := cfg.Deliveries
+	visibleDeliveries := expandedDeliveries
 	truncated := false
 	if len(visibleDeliveries) > maxVisibleDeliveries {
 		visibleDeliveries = visibleDeliveries[:maxVisibleDeliveries]
@@ -415,23 +475,35 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 		}
 
 		for index, deliveryConfig := range visibleDeliveries[start:end] {
-			scheduledAt, err := deliveryConfig.ScheduledAt(location)
-			if err != nil {
-				return nil, err
-			}
-
-			label := deliveryConfig.ID
+			label := deliveryConfig.DeliveryID
 			if label == "" {
-				label = deliveryConfig.StateKey()
+				label = deliveryConfig.StateKey
+			}
+			if deliveryConfig.ReminderName != "" {
+				label += " / " + deliveryConfig.ReminderName
 			}
 
-			fieldValue := fmt.Sprintf(
-				"User: <@%s>\nWhen: %s\nValue: `%s`\nCustom Description: %s",
-				deliveryConfig.UserID,
-				scheduledAt.Format("2006-01-02 15:04 MST"),
-				deliveryConfig.Value,
-				boolLabel(deliveryConfig.Message != ""),
-			)
+			fieldLines := []string{
+				fmt.Sprintf("User: <@%s>", deliveryConfig.UserID),
+				fmt.Sprintf("When: %s", deliveryConfig.ScheduledAt.Format("2006-01-02 15:04 MST")),
+				fmt.Sprintf("Value: `%s`", deliveryConfig.Value),
+				fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
+			}
+			if deliveryConfig.ReminderName != "" {
+				fieldLines = append(fieldLines,
+					fmt.Sprintf("Reminder: %s", deliveryConfig.ReminderName),
+					fmt.Sprintf("Days Before Due: %d", deliveryConfig.DaysBeforeDue),
+				)
+			}
+			if deliveryConfig.DueDate != "" {
+				dueLine := deliveryConfig.DueDate
+				if deliveryConfig.DueTime != "" {
+					dueLine += " " + deliveryConfig.DueTime
+				}
+				fieldLines = append(fieldLines, fmt.Sprintf("Payment Due: %s", dueLine))
+			}
+
+			fieldValue := strings.Join(fieldLines, "\n")
 
 			pageEmbed.Fields = append(pageEmbed.Fields, &discordgo.MessageEmbedField{
 				Name:   fmt.Sprintf("%d. %s", start+index+1, trimForField(label, 240)),
@@ -471,6 +543,19 @@ func optionalString(options map[string]*discordgo.ApplicationCommandInteractionD
 	}
 
 	return strings.TrimSpace(option.StringValue())
+}
+
+func requiredString(options map[string]*discordgo.ApplicationCommandInteractionDataOption, name string) string {
+	return strings.TrimSpace(options[name].StringValue())
+}
+
+func optionalInt(options map[string]*discordgo.ApplicationCommandInteractionDataOption, name string, fallback int) int {
+	option, exists := options[name]
+	if !exists {
+		return fallback
+	}
+
+	return int(option.IntValue())
 }
 
 func (s *Service) respondError(interaction *discordgo.Interaction, message string) error {
@@ -516,6 +601,14 @@ func valueOrFallback(value, fallback string) string {
 	}
 
 	return value
+}
+
+func dueLine(deliveryConfig config.Delivery) string {
+	if deliveryConfig.DueTime != "" {
+		return deliveryConfig.DueDate + " " + deliveryConfig.DueTime
+	}
+
+	return deliveryConfig.DueDate
 }
 
 func (s *Service) memberHasAllowedRole(member *discordgo.Member) bool {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,9 +29,10 @@ type Discord struct {
 }
 
 type Runtime struct {
-	Timezone            string `toml:"timezone"`
-	PollIntervalSeconds int    `toml:"poll_interval_seconds"`
-	StatePath           string `toml:"state_path"`
+	Timezone             string `toml:"timezone"`
+	PollIntervalSeconds  int    `toml:"poll_interval_seconds"`
+	SendMissedDeliveries bool   `toml:"send_missed_deliveries"`
+	StatePath            string `toml:"state_path"`
 }
 
 type Embed struct {
@@ -41,12 +43,39 @@ type Embed struct {
 }
 
 type Delivery struct {
-	ID      string `toml:"id,omitempty"`
-	UserID  string `toml:"user_id"`
-	Date    string `toml:"date"`
-	Time    string `toml:"time"`
-	Message string `toml:"message,omitempty"`
-	Value   string `toml:"value"`
+	ID        string     `toml:"id,omitempty"`
+	UserID    string     `toml:"user_id"`
+	Date      string     `toml:"date"`
+	Time      string     `toml:"time"`
+	Message   string     `toml:"message,omitempty"`
+	Value     string     `toml:"value"`
+	DueDate   string     `toml:"due_date"`
+	DueTime   string     `toml:"due_time"`
+	Reminders []Reminder `toml:"reminders"`
+}
+
+type Reminder struct {
+	ID            string `toml:"id,omitempty"`
+	Name          string `toml:"name"`
+	DaysBeforeDue int    `toml:"days_before_due"`
+	Time          string `toml:"time"`
+	Message       string `toml:"message"`
+}
+
+type ScheduledDelivery struct {
+	StateKey      string
+	DeliveryID    string
+	UserID        string
+	Value         string
+	Message       string
+	ScheduledAt   time.Time
+	Date          string
+	Time          string
+	DueDate       string
+	DueTime       string
+	ReminderID    string
+	ReminderName  string
+	DaysBeforeDue int
 }
 
 func Load(path string) (*Config, error) {
@@ -172,6 +201,14 @@ func (c *Config) Validate() error {
 		delivery.Time = strings.TrimSpace(delivery.Time)
 		delivery.Message = strings.TrimSpace(delivery.Message)
 		delivery.Value = strings.TrimSpace(delivery.Value)
+		delivery.DueDate = strings.TrimSpace(delivery.DueDate)
+		delivery.DueTime = strings.TrimSpace(delivery.DueTime)
+		for reminderIndex := range delivery.Reminders {
+			delivery.Reminders[reminderIndex].ID = strings.TrimSpace(delivery.Reminders[reminderIndex].ID)
+			delivery.Reminders[reminderIndex].Name = strings.TrimSpace(delivery.Reminders[reminderIndex].Name)
+			delivery.Reminders[reminderIndex].Time = strings.TrimSpace(delivery.Reminders[reminderIndex].Time)
+			delivery.Reminders[reminderIndex].Message = strings.TrimSpace(delivery.Reminders[reminderIndex].Message)
+		}
 
 		if delivery.UserID == "" {
 			return fmt.Errorf("deliveries[%d].user_id is required", index)
@@ -179,28 +216,91 @@ func (c *Config) Validate() error {
 		if !discordUserIDPattern.MatchString(delivery.UserID) {
 			return fmt.Errorf("deliveries[%d].user_id must be a Discord snowflake", index)
 		}
-		if delivery.Date == "" {
-			return fmt.Errorf("deliveries[%d].date is required", index)
-		}
-		if delivery.Time == "" {
-			return fmt.Errorf("deliveries[%d].time is required", index)
-		}
 		if delivery.Value == "" {
 			return fmt.Errorf("deliveries[%d].value is required", index)
 		}
-		if delivery.Message == "" && c.Embed.DescriptionTemplate == "" {
-			return fmt.Errorf("deliveries[%d] requires either message or embed.description_template", index)
+
+		isLegacySchedule := delivery.Date != "" || delivery.Time != "" || delivery.Message != ""
+		isReminderSchedule := delivery.DueDate != "" || delivery.DueTime != "" || len(delivery.Reminders) > 0
+
+		if isLegacySchedule && isReminderSchedule {
+			return fmt.Errorf("deliveries[%d] must use either direct date/time scheduling or due_date/reminders, not both", index)
 		}
 
-		if _, err := delivery.ScheduledAt(location); err != nil {
-			return fmt.Errorf("deliveries[%d] has invalid date/time: %w", index, err)
+		if !isLegacySchedule && !isReminderSchedule {
+			return fmt.Errorf("deliveries[%d] must define either date/time or due_date with reminders", index)
 		}
 
-		id := delivery.StateKey()
-		if _, exists := seen[id]; exists {
-			return fmt.Errorf("duplicate delivery id/state key %q detected", id)
+		if isLegacySchedule {
+			if delivery.Date == "" {
+				return fmt.Errorf("deliveries[%d].date is required", index)
+			}
+			if delivery.Time == "" {
+				return fmt.Errorf("deliveries[%d].time is required", index)
+			}
+			if delivery.Message == "" && c.Embed.DescriptionTemplate == "" {
+				return fmt.Errorf("deliveries[%d] requires either message or embed.description_template", index)
+			}
+
+			if _, err := delivery.ScheduledAt(location); err != nil {
+				return fmt.Errorf("deliveries[%d] has invalid date/time: %w", index, err)
+			}
 		}
-		seen[id] = struct{}{}
+
+		if isReminderSchedule {
+			if delivery.DueDate == "" {
+				return fmt.Errorf("deliveries[%d].due_date is required", index)
+			}
+			if delivery.DueTime != "" {
+				if _, err := time.ParseInLocation("15:04", delivery.DueTime, location); err != nil {
+					return fmt.Errorf("deliveries[%d].due_time is invalid: %w", index, err)
+				}
+			}
+			if _, err := time.ParseInLocation("2006-01-02", delivery.DueDate, location); err != nil {
+				return fmt.Errorf("deliveries[%d].due_date is invalid: %w", index, err)
+			}
+			if len(delivery.Reminders) == 0 {
+				return fmt.Errorf("deliveries[%d].reminders must include at least one reminder", index)
+			}
+
+			seenReminderKeys := make(map[string]struct{}, len(delivery.Reminders))
+			for reminderIndex := range delivery.Reminders {
+				reminder := delivery.Reminders[reminderIndex]
+				if reminder.Name == "" {
+					return fmt.Errorf("deliveries[%d].reminders[%d].name is required", index, reminderIndex)
+				}
+				if reminder.Time == "" {
+					return fmt.Errorf("deliveries[%d].reminders[%d].time is required", index, reminderIndex)
+				}
+				if reminder.Message == "" && c.Embed.DescriptionTemplate == "" {
+					return fmt.Errorf("deliveries[%d].reminders[%d].message is required", index, reminderIndex)
+				}
+				if reminder.DaysBeforeDue < 0 {
+					return fmt.Errorf("deliveries[%d].reminders[%d].days_before_due must be zero or greater", index, reminderIndex)
+				}
+				if _, err := time.ParseInLocation("15:04", reminder.Time, location); err != nil {
+					return fmt.Errorf("deliveries[%d].reminders[%d].time is invalid: %w", index, reminderIndex, err)
+				}
+
+				reminderKey := reminder.keyPart()
+				if _, exists := seenReminderKeys[reminderKey]; exists {
+					return fmt.Errorf("deliveries[%d] has duplicate reminder key %q", index, reminderKey)
+				}
+				seenReminderKeys[reminderKey] = struct{}{}
+			}
+		}
+
+		scheduledDeliveries, err := delivery.Expand(location)
+		if err != nil {
+			return fmt.Errorf("deliveries[%d] expansion failed: %w", index, err)
+		}
+
+		for _, scheduledDelivery := range scheduledDeliveries {
+			if _, exists := seen[scheduledDelivery.StateKey]; exists {
+				return fmt.Errorf("duplicate delivery id/state key %q detected", scheduledDelivery.StateKey)
+			}
+			seen[scheduledDelivery.StateKey] = struct{}{}
+		}
 	}
 
 	return nil
@@ -224,7 +324,96 @@ func (d Delivery) StateKey() string {
 	return "auto:" + hex.EncodeToString(sum[:])
 }
 
-func (d Delivery) RenderMessage(template string) string {
+func (d Delivery) Expand(location *time.Location) ([]ScheduledDelivery, error) {
+	if len(d.Reminders) == 0 && d.DueDate == "" && d.DueTime == "" {
+		scheduledAt, err := d.ScheduledAt(location)
+		if err != nil {
+			return nil, err
+		}
+
+		return []ScheduledDelivery{
+			{
+				StateKey:    d.StateKey(),
+				DeliveryID:  d.ID,
+				UserID:      d.UserID,
+				Value:       d.Value,
+				Message:     d.Message,
+				ScheduledAt: scheduledAt,
+				Date:        d.Date,
+				Time:        d.Time,
+			},
+		}, nil
+	}
+
+	scheduledDeliveries := make([]ScheduledDelivery, 0, len(d.Reminders))
+	for _, reminder := range d.Reminders {
+		scheduledAt, err := reminder.ScheduledAt(d.DueDate, location)
+		if err != nil {
+			return nil, err
+		}
+
+		scheduledDeliveries = append(scheduledDeliveries, ScheduledDelivery{
+			StateKey:      d.ReminderStateKey(reminder),
+			DeliveryID:    d.ID,
+			UserID:        d.UserID,
+			Value:         d.Value,
+			Message:       reminder.Message,
+			ScheduledAt:   scheduledAt,
+			Date:          scheduledAt.Format("2006-01-02"),
+			Time:          scheduledAt.Format("15:04"),
+			DueDate:       d.DueDate,
+			DueTime:       d.DueTime,
+			ReminderID:    reminder.ID,
+			ReminderName:  reminder.Name,
+			DaysBeforeDue: reminder.DaysBeforeDue,
+		})
+	}
+
+	return scheduledDeliveries, nil
+}
+
+func (d Delivery) ReminderStateKey(reminder Reminder) string {
+	if d.ID != "" {
+		return "reminder:" + d.ID + ":" + reminder.keyPart()
+	}
+
+	sum := sha256.Sum256([]byte(strings.Join([]string{d.UserID, d.DueDate, reminder.keyPart()}, "|")))
+	return "reminder:auto:" + hex.EncodeToString(sum[:])
+}
+
+func (r Reminder) ScheduledAt(dueDate string, location *time.Location) (time.Time, error) {
+	dueDay, err := time.ParseInLocation("2006-01-02", dueDate, location)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	reminderTime, err := time.ParseInLocation("15:04", r.Time, location)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	scheduledDay := dueDay.AddDate(0, 0, -r.DaysBeforeDue)
+	return time.Date(
+		scheduledDay.Year(),
+		scheduledDay.Month(),
+		scheduledDay.Day(),
+		reminderTime.Hour(),
+		reminderTime.Minute(),
+		0,
+		0,
+		location,
+	), nil
+}
+
+func (r Reminder) keyPart() string {
+	if r.ID != "" {
+		return "id:" + r.ID
+	}
+
+	return strings.Join([]string{r.Name, strconv.Itoa(r.DaysBeforeDue), r.Time}, "|")
+}
+
+func (d ScheduledDelivery) RenderMessage(template string) string {
 	selectedTemplate := template
 	if d.Message != "" {
 		selectedTemplate = d.Message
@@ -235,6 +424,10 @@ func (d Delivery) RenderMessage(template string) string {
 		"{{userId}}", d.UserID,
 		"{{date}}", d.Date,
 		"{{time}}", d.Time,
+		"{{dueDate}}", d.DueDate,
+		"{{dueTime}}", d.DueTime,
+		"{{reminderName}}", d.ReminderName,
+		"{{daysBeforeDue}}", strconv.Itoa(d.DaysBeforeDue),
 	)
 
 	return replacer.Replace(selectedTemplate)
