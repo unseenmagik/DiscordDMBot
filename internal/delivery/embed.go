@@ -15,6 +15,14 @@ func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.ScheduledDeliv
 		return nil, fmt.Errorf("parse embed color: %w", err)
 	}
 
+	dueValue := scheduledAt.Format("2006-01-02 15:04 MST")
+	if deliveryConfig.DueDate != "" {
+		dueValue = deliveryConfig.DueDate
+		if deliveryConfig.DueTime != "" {
+			dueValue += " " + deliveryConfig.DueTime
+		}
+	}
+
 	fields := []*discordgo.MessageEmbedField{
 		{
 			Name:   "Value",
@@ -22,8 +30,8 @@ func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.ScheduledDeliv
 			Inline: true,
 		},
 		{
-			Name:   "Scheduled For",
-			Value:  scheduledAt.Format("2006-01-02 15:04 MST"),
+			Name:   "Due",
+			Value:  dueValue,
 			Inline: true,
 		},
 	}
@@ -32,19 +40,6 @@ func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.ScheduledDeliv
 		fields = append(fields, &discordgo.MessageEmbedField{
 			Name:   "Reminder",
 			Value:  deliveryConfig.ReminderName,
-			Inline: true,
-		})
-	}
-
-	if deliveryConfig.DueDate != "" {
-		dueValue := deliveryConfig.DueDate
-		if deliveryConfig.DueTime != "" {
-			dueValue += " " + deliveryConfig.DueTime
-		}
-
-		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "Payment Due",
-			Value:  dueValue,
 			Inline: true,
 		})
 	}

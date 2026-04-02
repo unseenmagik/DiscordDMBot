@@ -121,7 +121,7 @@ Each DM is sent as an embed with:
 - the configured footer
 - the configured color
 - the rendered description
-- automatic `Value` and `Scheduled For` fields
+- automatic `Value` and `Due` fields
 
 ## Build
 
@@ -208,9 +208,11 @@ pm2 restart discord-dm-bot
 
 The bot registers these slash commands in the configured guilds:
 
-- `/send-now user value [message]`
+- `/send-now user value [due_date] [due_time] [message]`
 - `/schedule-add user due_date value initial_time initial_message final_time final_message [due_time] [initial_days_before] [final_days_before] [id]`
 - `/schedule-view`
+
+`/send-now` can optionally include a due date and due time so the DM embed shows the payment due value instead of the current send timestamp.
 
 `/schedule-add` creates a payment schedule with two reminders:
 

@@ -135,12 +135,30 @@ func (s *Service) handleSendNow(interaction *discordgo.InteractionCreate) error 
 	}
 
 	now := time.Now().In(location)
+	dueDate := optionalString(options, "due_date")
+	dueTime := optionalString(options, "due_time")
+	if dueTime != "" && dueDate == "" {
+		return userFacingError{message: "due_time can only be used when due_date is also provided."}
+	}
+	if dueDate != "" {
+		if _, err := time.ParseInLocation("2006-01-02", dueDate, location); err != nil {
+			return userFacingError{message: "due_date must use YYYY-MM-DD format."}
+		}
+	}
+	if dueTime != "" {
+		if _, err := time.ParseInLocation("15:04", dueTime, location); err != nil {
+			return userFacingError{message: "due_time must use HH:MM 24-hour format."}
+		}
+	}
+
 	deliveryConfig := config.ScheduledDelivery{
 		UserID:      user.ID,
 		Date:        now.Format("2006-01-02"),
 		Time:        now.Format("15:04"),
 		Value:       strings.TrimSpace(options["value"].StringValue()),
 		Message:     optionalString(options, "message"),
+		DueDate:     dueDate,
+		DueTime:     dueTime,
 		ScheduledAt: now,
 	}
 
@@ -299,6 +317,18 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 					Name:        "value",
 					Description: "Value to inject into the embed template.",
 					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_date",
+					Description: "Optional due date in YYYY-MM-DD format.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_time",
+					Description: "Optional due time in HH:MM format.",
+					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
