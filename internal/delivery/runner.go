@@ -75,10 +75,7 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 
 		for _, scheduledDelivery := range scheduledDeliveries {
 			stateKey := scheduledDelivery.StateKey
-			if record, alreadyDelivered := fileState.Deliveries[stateKey]; alreadyDelivered {
-				if !now.Before(scheduledDelivery.ScheduledAt) {
-					r.notifySkippedAlreadyDelivered(cfg, scheduledDelivery, record.DeliveredAtUTC)
-				}
+			if _, alreadyDelivered := fileState.Deliveries[stateKey]; alreadyDelivered {
 				continue
 			}
 
@@ -171,35 +168,6 @@ func (r *Runner) notifySent(cfg *config.Config, deliveryGroup config.Delivery, d
 	content := fmt.Sprintf("Sent to %s | Reminder: %s | Due: %s | Guild: `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), guildID)
 	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, components); err != nil {
 		r.logger.Printf("admin notify sent failed: %v", err)
-	}
-}
-
-func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfig config.ScheduledDelivery, deliveredAtUTC string) {
-	if cfg.Discord.AdminChannelID == "" {
-		return
-	}
-
-	key := "skip:already-delivered:" + deliveryConfig.StateKey
-	if _, exists := r.notifyState[key]; exists {
-		return
-	}
-	r.notifyState[key] = deliveredAtUTC
-
-	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
-	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, deliveryConfig.ScheduledAt)
-	if err != nil {
-		r.logger.Printf("build admin skipped embed failed: %v", err)
-		return
-	}
-	embed, err = admin.CloneEmbedWithColor(embed, "#C53030")
-	if err != nil {
-		r.logger.Printf("recolor admin skipped embed failed: %v", err)
-		return
-	}
-
-	content := fmt.Sprintf("Skipped for %s | Reminder: %s | Due: %s | Reason: already marked delivered at `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), deliveredAtUTC)
-	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
-		r.logger.Printf("admin notify skipped failed: %v", err)
 	}
 }
 
