@@ -303,6 +303,7 @@ The bot registers these slash commands in the configured guilds:
 
 - `/send-now user value [due_date] [due_time] [message]`
 - `/schedule-add user due_date value initial_time initial_message final_time final_message [frequency] [due_time] [initial_days_before] [final_days_before] [id]`
+- `/schedule-edit id [user] [due_date] [value] [frequency] [due_time] [initial_title] [initial_time] [initial_message] [initial_days_before] [final_title] [final_time] [final_message] [final_days_before] [due_title] [due_time_reminder] [due_message] [due_days_before] [late_title] [late_message]`
 - `/schedule-view`
 
 `/send-now` can optionally include a due date and due time so the DM embed shows the payment due value instead of the current send timestamp.
@@ -321,6 +322,14 @@ Formats:
 - `final_time`: `HH:MM`
 - `initial_days_before`: optional, defaults to `3`
 - `final_days_before`: optional, defaults to `1`
+
+`/schedule-edit` updates an existing delivery group by its top-level `id`. You can edit:
+
+- the parent delivery values like user, due date, due time, frequency, and value
+- the `initial` reminder
+- the `final` reminder
+- the `due` reminder
+- the `late` reminder
 
 ## Security Notes
 

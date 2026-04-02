@@ -54,6 +54,41 @@ func (s *Store) AddDelivery(delivery Delivery) (*Config, error) {
 	return cfg, nil
 }
 
+func (s *Store) UpdateDelivery(deliveryID string, updateFn func(*Delivery) error) (*Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cfg, err := s.loadUnlocked()
+	if err != nil {
+		return nil, err
+	}
+
+	index := -1
+	for i := range cfg.Deliveries {
+		if cfg.Deliveries[i].ID == deliveryID {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return nil, fmt.Errorf("delivery %q was not found", deliveryID)
+	}
+
+	if err := updateFn(&cfg.Deliveries[index]); err != nil {
+		return nil, err
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	if err := s.saveUnlocked(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
 func (s *Store) loadUnlocked() (*Config, error) {
 	return Load(s.path)
 }

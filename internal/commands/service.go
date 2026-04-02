@@ -18,6 +18,7 @@ import (
 const (
 	commandSendNow      = "send-now"
 	commandScheduleAdd  = "schedule-add"
+	commandScheduleEdit = "schedule-edit"
 	commandScheduleView = "schedule-view"
 	maxScheduleEmbeds   = 10
 	maxFieldsPerEmbed   = 5
@@ -99,6 +100,8 @@ func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *d
 			err = s.handleSendNow(interaction)
 		case commandScheduleAdd:
 			err = s.handleScheduleAdd(interaction)
+		case commandScheduleEdit:
+			err = s.handleScheduleEdit(interaction)
 		case commandScheduleView:
 			err = s.handleScheduleView(interaction)
 		default:
@@ -316,6 +319,123 @@ func (s *Service) handleScheduleView(interaction *discordgo.InteractionCreate) e
 	}
 
 	return s.respondEmbeds(interaction.Interaction, "", embeds)
+}
+
+func (s *Service) handleScheduleEdit(interaction *discordgo.InteractionCreate) error {
+	options := optionsByName(interaction.ApplicationCommandData().Options)
+
+	deliveryID := requiredString(options, "id")
+	if deliveryID == "" {
+		return userFacingError{message: "A delivery id is required."}
+	}
+
+	currentConfig, err := s.configStore.Load()
+	if err != nil {
+		return err
+	}
+
+	location, err := time.LoadLocation(currentConfig.Runtime.Timezone)
+	if err != nil {
+		return err
+	}
+
+	var editedDelivery config.Delivery
+	cfg, err := s.configStore.UpdateDelivery(deliveryID, func(deliveryConfig *config.Delivery) error {
+		if userOption, exists := options["user"]; exists {
+			user := userOption.UserValue(nil)
+			if user == nil {
+				return userFacingError{message: "A valid Discord user is required."}
+			}
+			if _, err := delivery.EnsureUserInAnyGuild(s.session, currentConfig.Discord.GuildIDs, user.ID); err != nil {
+				return userFacingError{message: fmt.Sprintf("<@%s> is not a member of any configured guild.", user.ID)}
+			}
+			deliveryConfig.UserID = user.ID
+		}
+
+		if value := optionalString(options, "due_date"); value != "" {
+			deliveryConfig.DueDate = value
+		}
+		if _, exists := options["due_time"]; exists {
+			deliveryConfig.DueTime = optionalString(options, "due_time")
+		}
+		if value := optionalString(options, "frequency"); value != "" {
+			deliveryConfig.Frequency = value
+		}
+		if value := optionalString(options, "value"); value != "" {
+			deliveryConfig.Value = value
+		}
+
+		applyReminderEdit(deliveryConfig, "initial", reminderEdit{
+			Title:         optionalString(options, "initial_title"),
+			Time:          optionalString(options, "initial_time"),
+			Message:       optionalString(options, "initial_message"),
+			DaysBeforeDue: optionalOptionalInt(options, "initial_days_before"),
+			DefaultName:   "Initial Reminder",
+		})
+		applyReminderEdit(deliveryConfig, "final", reminderEdit{
+			Title:         optionalString(options, "final_title"),
+			Time:          optionalString(options, "final_time"),
+			Message:       optionalString(options, "final_message"),
+			DaysBeforeDue: optionalOptionalInt(options, "final_days_before"),
+			DefaultName:   "Final Reminder",
+		})
+		applyReminderEdit(deliveryConfig, "due", reminderEdit{
+			Title:         optionalString(options, "due_title"),
+			Time:          optionalString(options, "due_time_reminder"),
+			Message:       optionalString(options, "due_message"),
+			DaysBeforeDue: optionalOptionalInt(options, "due_days_before"),
+			DefaultName:   "Due Reminder",
+		})
+		applyReminderEdit(deliveryConfig, "late", reminderEdit{
+			Title:       optionalString(options, "late_title"),
+			Message:     optionalString(options, "late_message"),
+			DefaultName: "Late Reminder",
+		})
+
+		editedDelivery = *deliveryConfig
+		return nil
+	})
+	if err != nil {
+		return userFacingError{message: err.Error()}
+	}
+
+	expandedDeliveries, err := editedDelivery.ExpandAt(location, time.Now().In(location))
+	if err != nil {
+		return err
+	}
+
+	color, err := config.ParseHexColor(cfg.Embed.Color)
+	if err != nil {
+		return err
+	}
+
+	confirmation := &discordgo.MessageEmbed{
+		Title:       "Schedule Updated",
+		Description: "The payment reminder schedule was updated in the config file.",
+		Color:       color,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "ID", Value: editedDelivery.ID, Inline: true},
+			{Name: "User", Value: fmt.Sprintf("<@%s>", editedDelivery.UserID), Inline: true},
+			{Name: "Value", Value: editedDelivery.Value, Inline: true},
+			{Name: "Payment Due", Value: dueLine(editedDelivery), Inline: false},
+			{Name: "Frequency", Value: frequencyLabel(editedDelivery.Frequency), Inline: true},
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	for _, scheduledDelivery := range expandedDeliveries {
+		confirmation.Fields = append(confirmation.Fields, &discordgo.MessageEmbedField{
+			Name: fmt.Sprintf("%s", valueOrFallback(scheduledDelivery.ReminderName, "Reminder")),
+			Value: fmt.Sprintf(
+				"When: %s\nDays Before Due: %d",
+				scheduledDelivery.ScheduledAt.Format("2006-01-02 15:04 MST"),
+				scheduledDelivery.DaysBeforeDue,
+			),
+			Inline: false,
+		})
+	}
+
+	return s.respondEmbeds(interaction.Interaction, "", []*discordgo.MessageEmbed{confirmation})
 }
 
 func (s *Service) handleComponent(interaction *discordgo.InteractionCreate) error {
@@ -563,6 +683,140 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 			},
 		},
 		{
+			Name:         commandScheduleEdit,
+			Description:  "Edit an existing payment schedule and its reminder messages.",
+			DMPermission: &dmPermission,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "id",
+					Description: "Existing delivery id to edit.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "user",
+					Description: "Optional replacement user to DM.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_date",
+					Description: "Optional replacement due date in YYYY-MM-DD format.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "value",
+					Description: "Optional replacement value.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "frequency",
+					Description: "Optional replacement frequency.",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "once", Value: "once"},
+						{Name: "daily", Value: "daily"},
+						{Name: "weekly", Value: "weekly"},
+						{Name: "bi-weekly", Value: "bi-weekly"},
+						{Name: "monthly", Value: "monthly"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_time",
+					Description: "Optional replacement payment due time in HH:MM format.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "initial_title",
+					Description: "Optional replacement title for the initial reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "initial_time",
+					Description: "Optional replacement time for the initial reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "initial_message",
+					Description: "Optional replacement message for the initial reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "initial_days_before",
+					Description: "Optional replacement days-before-due for the initial reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "final_title",
+					Description: "Optional replacement title for the final reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "final_time",
+					Description: "Optional replacement time for the final reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "final_message",
+					Description: "Optional replacement message for the final reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "final_days_before",
+					Description: "Optional replacement days-before-due for the final reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_title",
+					Description: "Optional replacement title for the due reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_time_reminder",
+					Description: "Optional replacement time for the due reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_message",
+					Description: "Optional replacement message for the due reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "due_days_before",
+					Description: "Optional replacement days-before-due for the due reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "late_title",
+					Description: "Optional replacement title for the late reminder.",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "late_message",
+					Description: "Optional replacement message for the late reminder.",
+					Required:    false,
+				},
+			},
+		},
+		{
 			Name:         commandScheduleView,
 			Description:  "Read the current config as parsed embed pages.",
 			DMPermission: &dmPermission,
@@ -738,6 +992,70 @@ func optionalInt(options map[string]*discordgo.ApplicationCommandInteractionData
 	}
 
 	return int(option.IntValue())
+}
+
+func optionalOptionalInt(options map[string]*discordgo.ApplicationCommandInteractionDataOption, name string) *int {
+	option, exists := options[name]
+	if !exists {
+		return nil
+	}
+
+	value := int(option.IntValue())
+	return &value
+}
+
+type reminderEdit struct {
+	Title         string
+	Time          string
+	Message       string
+	DaysBeforeDue *int
+	DefaultName   string
+}
+
+func applyReminderEdit(deliveryConfig *config.Delivery, reminderID string, edit reminderEdit) {
+	if deliveryConfig == nil || !edit.hasValues() {
+		return
+	}
+
+	index := -1
+	for i := range deliveryConfig.Reminders {
+		if strings.EqualFold(strings.TrimSpace(deliveryConfig.Reminders[i].ID), reminderID) {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		deliveryConfig.Reminders = append(deliveryConfig.Reminders, config.Reminder{
+			ID:   reminderID,
+			Name: edit.DefaultName,
+		})
+		index = len(deliveryConfig.Reminders) - 1
+	}
+
+	reminder := &deliveryConfig.Reminders[index]
+	if reminder.Name == "" {
+		reminder.Name = edit.DefaultName
+	}
+	if edit.Title != "" {
+		reminder.Title = edit.Title
+	}
+	if edit.Time != "" {
+		reminder.Time = edit.Time
+	}
+	if edit.Message != "" {
+		reminder.Message = edit.Message
+	}
+	if edit.DaysBeforeDue != nil {
+		reminder.DaysBeforeDue = *edit.DaysBeforeDue
+	}
+}
+
+func (r reminderEdit) hasValues() bool {
+	return strings.TrimSpace(r.Title) != "" ||
+		strings.TrimSpace(r.Time) != "" ||
+		strings.TrimSpace(r.Message) != "" ||
+		r.DaysBeforeDue != nil
 }
 
 func (s *Service) respondError(interaction *discordgo.Interaction, message string) error {
