@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -62,18 +63,21 @@ func (w *DiscordWebhook) Send(title, description string, color int, fields []Fie
 	embedFields := make([]embedField, 0, len(fields))
 	for _, field := range fields {
 		embedFields = append(embedFields, embedField{
-			Name:   field.Name,
-			Value:  field.Value,
+			Name:   trim(field.Name, 256),
+			Value:  trim(field.Value, 1024),
 			Inline: field.Inline,
 		})
+	}
+	if len(embedFields) > 25 {
+		embedFields = embedFields[:25]
 	}
 
 	body, err := json.Marshal(payload{
 		Username: "Discord DM Bot",
 		Embeds: []embed{
 			{
-				Title:       title,
-				Description: description,
+				Title:       trim(title, 256),
+				Description: trim(description, 4096),
 				Color:       color,
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),
 				Fields:      embedFields,
@@ -91,8 +95,20 @@ func (w *DiscordWebhook) Send(title, description string, color int, fields []Fie
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook returned status %s", resp.Status)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if len(body) == 0 {
+			return fmt.Errorf("webhook returned status %s", resp.Status)
+		}
+		return fmt.Errorf("webhook returned status %s: %s", resp.Status, string(body))
 	}
 
 	return nil
+}
+
+func trim(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+
+	return value[:max]
 }
