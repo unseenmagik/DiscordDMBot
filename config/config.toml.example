@@ -30,11 +30,11 @@ state_path = "data/delivery-state.json"
 title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
-color = "#2B6CB0"
+color = "#C53030"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
 late_color = "#C53030"
-one_off_color = "#C53030"
+one_off_color = "#b630c5"
 
 # Each [[deliveries]] block is one payment/reminder group for one user.
 # The user_id, due_date, due_time, frequency, and value below apply to every
