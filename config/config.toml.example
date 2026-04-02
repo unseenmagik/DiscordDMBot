@@ -33,6 +33,7 @@ footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
+late_color = "#C53030"
 one_off_color = "#C53030"
 
 # Each [[deliveries]] block is one payment/reminder group for one user.

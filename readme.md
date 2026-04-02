@@ -55,6 +55,7 @@ footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
+late_color = "#C53030"
 one_off_color = "#C53030"
 
 [[deliveries]]
@@ -171,6 +172,7 @@ Reminder embeds also get automatic color coding from config:
 
 - reminder `id = "initial"` uses `embed.initial_color`
 - reminder `id = "final"` uses `embed.final_color`
+- reminder `id = "late"` uses `embed.late_color`
 - top-level one-off `[[deliveries]]` entries use `embed.one_off_color`
 - anything else falls back to `embed.color`
 

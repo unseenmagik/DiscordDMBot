@@ -45,6 +45,8 @@ func embedColor(cfg *config.Config, deliveryConfig config.ScheduledDelivery) (in
 		return config.ParseHexColor(cfg.Embed.InitialColor)
 	case "final":
 		return config.ParseHexColor(cfg.Embed.FinalColor)
+	case "late":
+		return config.ParseHexColor(cfg.Embed.LateColor)
 	}
 
 	if deliveryConfig.ReminderID == "" && deliveryConfig.DeliveryID != "" {
