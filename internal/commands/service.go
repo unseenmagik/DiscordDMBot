@@ -425,7 +425,8 @@ func (s *Service) handleLateReminder(interaction *discordgo.InteractionCreate, d
 	if err := admin.SendMessage(
 		s.session,
 		cfg.Discord.AdminChannelID,
-		admin.StatusEmbed("Late Reminder Sent", adminMessageBody(lateDelivery, "Status: Sent manually from admin action"), 0xC53030),
+		fmt.Sprintf("Late reminder sent to %s | Reminder: %s | Due: %s", lateDelivery.UserMention(), valueOrFallback(lateDelivery.ReminderName, "Late Reminder"), lateDelivery.DueDisplay()),
+		embed,
 		nil,
 	); err != nil {
 		s.logger.Printf("send admin late reminder status failed: %v", err)

@@ -156,13 +156,8 @@ func (r *Runner) notifySent(cfg *config.Config, deliveryGroup config.Delivery, d
 		return
 	}
 
-	description := notificationBody(
-		deliveryConfig,
-		"Status: Sent",
-		fmt.Sprintf("Guild: `%s`", guildID),
-	)
-
-	embed, err := statusEmbed("Reminder Sent", description, 0x2F855A)
+	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
+	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, deliveryConfig.ScheduledAt)
 	if err != nil {
 		r.logger.Printf("build admin sent embed failed: %v", err)
 		return
@@ -173,7 +168,8 @@ func (r *Runner) notifySent(cfg *config.Config, deliveryGroup config.Delivery, d
 		components = admin.LateReminderComponents(deliveryConfig.DeliveryID, deliveryConfig.DueDate)
 	}
 
-	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, components); err != nil {
+	content := fmt.Sprintf("Sent to %s | Reminder: %s | Due: %s | Guild: `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), guildID)
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, components); err != nil {
 		r.logger.Printf("admin notify sent failed: %v", err)
 	}
 }
@@ -189,22 +185,15 @@ func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfi
 	}
 	r.notifyState[key] = deliveredAtUTC
 
-	embed, err := statusEmbed(
-		"Reminder Skipped",
-		notificationBody(
-			deliveryConfig,
-			"Status: Skipped",
-			"Reason: Already marked as delivered in local state",
-			fmt.Sprintf("Delivered At (UTC): `%s`", deliveredAtUTC),
-		),
-		0xDD6B20,
-	)
+	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
+	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, deliveryConfig.ScheduledAt)
 	if err != nil {
 		r.logger.Printf("build admin skipped embed failed: %v", err)
 		return
 	}
 
-	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, nil); err != nil {
+	content := fmt.Sprintf("Skipped for %s | Reminder: %s | Due: %s | Reason: already marked delivered at `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), deliveredAtUTC)
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
 		r.logger.Printf("admin notify skipped failed: %v", err)
 	}
 }
@@ -221,24 +210,15 @@ func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig co
 	}
 	r.notifyState[key] = reason
 
-	embed, err := statusEmbed(
-		"Reminder Skipped",
-		notificationBody(
-			deliveryConfig,
-			"Status: Skipped",
-			"Reason: Send window expired while missed deliveries are disabled",
-			fmt.Sprintf("Scheduled At: `%s`", deliveryConfig.ScheduledAt.Format(time.RFC3339)),
-			fmt.Sprintf("Checked At: `%s`", now.Format(time.RFC3339)),
-			fmt.Sprintf("Send Window: `%s`", sendWindow),
-		),
-		0xDD6B20,
-	)
+	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
+	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, deliveryConfig.ScheduledAt)
 	if err != nil {
 		r.logger.Printf("build admin skipped embed failed: %v", err)
 		return
 	}
 
-	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, nil); err != nil {
+	content := fmt.Sprintf("Skipped for %s | Reminder: %s | Due: %s | Reason: send window expired at `%s` (window `%s`)", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), now.Format(time.RFC3339), sendWindow)
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
 		r.logger.Printf("admin notify skipped failed: %v", err)
 	}
 }
@@ -255,21 +235,15 @@ func (r *Runner) notifyFailed(cfg *config.Config, deliveryConfig config.Schedule
 	}
 	r.notifyState[key] = reason
 
-	embed, err := statusEmbed(
-		"Reminder Send Failed",
-		notificationBody(
-			deliveryConfig,
-			"Status: Failed",
-			fmt.Sprintf("Reason: `%s`", reason),
-		),
-		0xC53030,
-	)
+	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
+	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, deliveryConfig.ScheduledAt)
 	if err != nil {
 		r.logger.Printf("build admin failed embed failed: %v", err)
 		return
 	}
 
-	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, nil); err != nil {
+	content := fmt.Sprintf("Failed for %s | Reminder: %s | Due: %s | Reason: `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), reason)
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
 		r.logger.Printf("admin notify failed failed: %v", err)
 	}
 }
@@ -291,34 +265,6 @@ func reminderValue(deliveryConfig config.ScheduledDelivery) string {
 	}
 
 	return deliveryConfig.ReminderName
-}
-
-func notificationBody(deliveryConfig config.ScheduledDelivery, extraLines ...string) string {
-	lines := []string{
-		fmt.Sprintf("User: %s", deliveryConfig.UserMention()),
-		fmt.Sprintf("Value: **%s**", deliveryConfig.Value),
-		fmt.Sprintf("Reminder: **%s**", reminderValue(deliveryConfig)),
-		fmt.Sprintf("Due: **%s**", dueValue(deliveryConfig)),
-	}
-
-	for _, line := range extraLines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		lines = append(lines, line)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func statusEmbed(title, description string, color int) (*discordgo.MessageEmbed, error) {
-	return &discordgo.MessageEmbed{
-		Title:       title,
-		Description: description,
-		Color:       color,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-	}, nil
 }
 
 func shouldOfferLateReminder(deliveryGroup config.Delivery, deliveryConfig config.ScheduledDelivery) bool {

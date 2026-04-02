@@ -11,12 +11,13 @@ import (
 
 const lateReminderPrefix = "late-reminder"
 
-func SendMessage(session *discordgo.Session, channelID string, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+func SendMessage(session *discordgo.Session, channelID, content string, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
 	if channelID == "" {
 		return nil
 	}
 
 	message := &discordgo.MessageSend{
+		Content:    content,
 		Embed:      embed,
 		Components: components,
 	}
