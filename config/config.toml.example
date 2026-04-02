@@ -28,6 +28,9 @@ title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
+initial_color = "#2F855A"
+final_color = "#DD6B20"
+one_off_color = "#C53030"
 
 [notifications]
 # Optional Discord webhook for scheduler event notifications.

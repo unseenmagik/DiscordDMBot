@@ -52,6 +52,9 @@ title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
+initial_color = "#2F855A"
+final_color = "#DD6B20"
+one_off_color = "#C53030"
 
 [notifications]
 discord_webhook_url = ""
@@ -168,12 +171,12 @@ Each DM is sent as an embed with:
 - the bot avatar as the footer icon and thumbnail when available
 - the rendered description only, so layout stays clean and controlled by your template
 
-Reminder embeds also get automatic color coding by `days_before_due`:
+Reminder embeds also get automatic color coding from config:
 
-- `3` days before due: green
-- `1` day before due: orange
-- `0` days before due: blue
-- any other value: falls back to `embed.color`
+- reminder `id = "initial"` uses `embed.initial_color`
+- reminder `id = "final"` uses `embed.final_color`
+- top-level one-off `[[deliveries]]` entries use `embed.one_off_color`
+- anything else falls back to `embed.color`
 
 ## Build
 

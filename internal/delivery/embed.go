@@ -40,16 +40,18 @@ func BuildDeliveryEmbed(session *discordgo.Session, cfg *config.Config, delivery
 }
 
 func embedColor(cfg *config.Config, deliveryConfig config.ScheduledDelivery) (int, error) {
-	switch deliveryConfig.DaysBeforeDue {
-	case 3:
-		return config.ParseHexColor("#2F855A")
-	case 1:
-		return config.ParseHexColor("#DD6B20")
-	case 0:
-		return config.ParseHexColor("#2B6CB0")
-	default:
-		return config.ParseHexColor(cfg.Embed.Color)
+	switch deliveryConfig.ReminderID {
+	case "initial":
+		return config.ParseHexColor(cfg.Embed.InitialColor)
+	case "final":
+		return config.ParseHexColor(cfg.Embed.FinalColor)
 	}
+
+	if deliveryConfig.ReminderID == "" && deliveryConfig.DeliveryID != "" {
+		return config.ParseHexColor(cfg.Embed.OneOffColor)
+	}
+
+	return config.ParseHexColor(cfg.Embed.Color)
 }
 
 func botAvatarURL(session *discordgo.Session) string {

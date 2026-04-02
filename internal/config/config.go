@@ -43,6 +43,9 @@ type Embed struct {
 	DescriptionTemplate string `toml:"description_template"`
 	Footer              string `toml:"footer"`
 	Color               string `toml:"color"`
+	InitialColor        string `toml:"initial_color"`
+	FinalColor          string `toml:"final_color"`
+	OneOffColor         string `toml:"one_off_color"`
 }
 
 type Notifications struct {
@@ -137,6 +140,9 @@ func (c *Config) Validate() error {
 	c.Embed.DescriptionTemplate = strings.TrimSpace(c.Embed.DescriptionTemplate)
 	c.Embed.Footer = strings.TrimSpace(c.Embed.Footer)
 	c.Embed.Color = strings.TrimSpace(c.Embed.Color)
+	c.Embed.InitialColor = strings.TrimSpace(c.Embed.InitialColor)
+	c.Embed.FinalColor = strings.TrimSpace(c.Embed.FinalColor)
+	c.Embed.OneOffColor = strings.TrimSpace(c.Embed.OneOffColor)
 	c.Notifications.DiscordWebhookURL = strings.TrimSpace(c.Notifications.DiscordWebhookURL)
 
 	if c.Runtime.PollIntervalSeconds <= 0 {
@@ -202,9 +208,27 @@ func (c *Config) Validate() error {
 	if c.Embed.Color == "" {
 		c.Embed.Color = "#2B6CB0"
 	}
+	if c.Embed.InitialColor == "" {
+		c.Embed.InitialColor = "#2F855A"
+	}
+	if c.Embed.FinalColor == "" {
+		c.Embed.FinalColor = "#DD6B20"
+	}
+	if c.Embed.OneOffColor == "" {
+		c.Embed.OneOffColor = "#C53030"
+	}
 
 	if _, err := ParseHexColor(c.Embed.Color); err != nil {
 		return fmt.Errorf("invalid embed.color: %w", err)
+	}
+	if _, err := ParseHexColor(c.Embed.InitialColor); err != nil {
+		return fmt.Errorf("invalid embed.initial_color: %w", err)
+	}
+	if _, err := ParseHexColor(c.Embed.FinalColor); err != nil {
+		return fmt.Errorf("invalid embed.final_color: %w", err)
+	}
+	if _, err := ParseHexColor(c.Embed.OneOffColor); err != nil {
+		return fmt.Errorf("invalid embed.one_off_color: %w", err)
 	}
 
 	if c.Notifications.DiscordWebhookURL != "" {
