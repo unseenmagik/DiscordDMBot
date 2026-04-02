@@ -10,7 +10,7 @@ import (
 )
 
 func BuildDeliveryEmbed(session *discordgo.Session, cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) (*discordgo.MessageEmbed, error) {
-	color, err := config.ParseHexColor(cfg.Embed.Color)
+	color, err := embedColor(cfg, deliveryConfig)
 	if err != nil {
 		return nil, fmt.Errorf("parse embed color: %w", err)
 	}
@@ -66,6 +66,19 @@ func BuildDeliveryEmbed(session *discordgo.Session, cfg *config.Config, delivery
 	}
 
 	return embed, nil
+}
+
+func embedColor(cfg *config.Config, deliveryConfig config.ScheduledDelivery) (int, error) {
+	switch deliveryConfig.DaysBeforeDue {
+	case 3:
+		return config.ParseHexColor("#2F855A")
+	case 1:
+		return config.ParseHexColor("#DD6B20")
+	case 0:
+		return config.ParseHexColor("#2B6CB0")
+	default:
+		return config.ParseHexColor(cfg.Embed.Color)
+	}
 }
 
 func botAvatarURL(session *discordgo.Session) string {

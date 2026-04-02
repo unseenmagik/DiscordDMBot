@@ -124,6 +124,13 @@ Each DM is sent as an embed with:
 - the rendered description
 - automatic `Value` and `Due` fields
 
+Reminder embeds also get automatic color coding by `days_before_due`:
+
+- `3` days before due: green
+- `1` day before due: orange
+- `0` days before due: blue
+- any other value: falls back to `embed.color`
+
 ## Build
 
 Run:
