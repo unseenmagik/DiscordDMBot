@@ -327,12 +327,6 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "due_time",
-					Description: "Optional payment due time in HH:MM format.",
-					Required:    false,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "value",
 					Description: "Value to inject into the embed template.",
 					Required:    true,
@@ -360,6 +354,12 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 					Name:        "final_message",
 					Description: "Message for the final reminder.",
 					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_time",
+					Description: "Optional payment due time in HH:MM format.",
+					Required:    false,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionInteger,
