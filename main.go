@@ -14,7 +14,7 @@ import (
 	"discorddmbot/internal/config"
 	"discorddmbot/internal/delivery"
 	"discorddmbot/internal/logging"
-	"discorddmbot/internal/notify"
+	"discorddmbot/internal/state"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -54,7 +54,8 @@ func main() {
 		logger.Fatalf("validate bot token: %v", err)
 	}
 
-	commandService := commands.NewService(session, configStore, logger, appConfig.Discord)
+	stateStore := state.NewStore(appConfig.Runtime.StatePath)
+	commandService := commands.NewService(session, configStore, stateStore, logger, appConfig.Discord)
 	if err := commandService.Register(botUser.ID); err != nil {
 		logger.Fatalf("register slash commands: %v", err)
 	}
@@ -73,8 +74,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	webhookNotifier := notify.NewDiscordWebhook(appConfig.Notifications.DiscordWebhookURL, logger)
-	runner := delivery.NewRunner(session, configStore, appConfig.Runtime.StatePath, logger, webhookNotifier)
+	runner := delivery.NewRunner(session, configStore, stateStore, logger)
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runner.Run(ctx)

@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -18,17 +17,17 @@ import (
 var discordUserIDPattern = regexp.MustCompile(`^\d{10,20}$`)
 
 type Config struct {
-	Discord       Discord       `toml:"discord"`
-	Runtime       Runtime       `toml:"runtime"`
-	Embed         Embed         `toml:"embed"`
-	Notifications Notifications `toml:"notifications"`
-	Deliveries    []Delivery    `toml:"deliveries"`
+	Discord    Discord    `toml:"discord"`
+	Runtime    Runtime    `toml:"runtime"`
+	Embed      Embed      `toml:"embed"`
+	Deliveries []Delivery `toml:"deliveries"`
 }
 
 type Discord struct {
 	BotToken       string   `toml:"bot_token"`
 	GuildIDs       []string `toml:"guild_ids"`
 	AllowedRoleIDs []string `toml:"allowed_role_ids"`
+	AdminChannelID string   `toml:"admin_channel_id"`
 }
 
 type Runtime struct {
@@ -46,13 +45,6 @@ type Embed struct {
 	InitialColor        string `toml:"initial_color"`
 	FinalColor          string `toml:"final_color"`
 	OneOffColor         string `toml:"one_off_color"`
-}
-
-type Notifications struct {
-	DiscordWebhookURL string `toml:"discord_webhook_url"`
-	NotifySent        bool   `toml:"notify_sent"`
-	NotifySkipped     bool   `toml:"notify_skipped"`
-	NotifyFailed      bool   `toml:"notify_failed"`
 }
 
 type Delivery struct {
@@ -143,7 +135,7 @@ func (c *Config) Validate() error {
 	c.Embed.InitialColor = strings.TrimSpace(c.Embed.InitialColor)
 	c.Embed.FinalColor = strings.TrimSpace(c.Embed.FinalColor)
 	c.Embed.OneOffColor = strings.TrimSpace(c.Embed.OneOffColor)
-	c.Notifications.DiscordWebhookURL = strings.TrimSpace(c.Notifications.DiscordWebhookURL)
+	c.Discord.AdminChannelID = strings.TrimSpace(c.Discord.AdminChannelID)
 
 	if c.Runtime.PollIntervalSeconds <= 0 {
 		c.Runtime.PollIntervalSeconds = 15
@@ -231,16 +223,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid embed.one_off_color: %w", err)
 	}
 
-	if c.Notifications.DiscordWebhookURL != "" {
-		parsedURL, err := url.Parse(c.Notifications.DiscordWebhookURL)
-		if err != nil {
-			return fmt.Errorf("invalid notifications.discord_webhook_url: %w", err)
-		}
-		if parsedURL.Scheme != "https" || parsedURL.Host == "" {
-			return fmt.Errorf("notifications.discord_webhook_url must be a valid https URL")
-		}
-	} else if c.Notifications.NotifySent || c.Notifications.NotifySkipped || c.Notifications.NotifyFailed {
-		return fmt.Errorf("notifications.discord_webhook_url is required when notification events are enabled")
+	if c.Discord.AdminChannelID != "" && !discordUserIDPattern.MatchString(c.Discord.AdminChannelID) {
+		return fmt.Errorf("discord.admin_channel_id must be a Discord snowflake")
 	}
 
 	seen := make(map[string]struct{}, len(c.Deliveries))
@@ -328,7 +312,7 @@ func (c *Config) Validate() error {
 				if reminder.Name == "" {
 					return fmt.Errorf("deliveries[%d].reminders[%d].name is required", index, reminderIndex)
 				}
-				if reminder.Time == "" {
+				if !reminder.ManualOnly() && reminder.Time == "" {
 					return fmt.Errorf("deliveries[%d].reminders[%d].time is required", index, reminderIndex)
 				}
 				if reminder.Message == "" && c.Embed.DescriptionTemplate == "" {
@@ -337,8 +321,10 @@ func (c *Config) Validate() error {
 				if reminder.DaysBeforeDue < 0 {
 					return fmt.Errorf("deliveries[%d].reminders[%d].days_before_due must be zero or greater", index, reminderIndex)
 				}
-				if _, err := time.ParseInLocation("15:04", reminder.Time, location); err != nil {
-					return fmt.Errorf("deliveries[%d].reminders[%d].time is invalid: %w", index, reminderIndex, err)
+				if reminder.Time != "" {
+					if _, err := time.ParseInLocation("15:04", reminder.Time, location); err != nil {
+						return fmt.Errorf("deliveries[%d].reminders[%d].time is invalid: %w", index, reminderIndex, err)
+					}
 				}
 
 				reminderKey := reminder.keyPart()
@@ -422,6 +408,9 @@ func (d Delivery) ExpandAt(location *time.Location, reference time.Time) ([]Sche
 	for _, occurrenceDueDate := range occurrenceDueDates {
 		formattedDueDate := occurrenceDueDate.Format("2006-01-02")
 		for _, reminder := range d.Reminders {
+			if reminder.ManualOnly() {
+				continue
+			}
 			scheduledAt, err := reminder.ScheduledAt(formattedDueDate, location)
 			if err != nil {
 				return nil, err
@@ -502,6 +491,20 @@ func (r Reminder) keyPart() string {
 	}
 
 	return strings.Join([]string{r.Name, strconv.Itoa(r.DaysBeforeDue), r.Time}, "|")
+}
+
+func (r Reminder) ManualOnly() bool {
+	return strings.EqualFold(strings.TrimSpace(r.ID), "late")
+}
+
+func (d Delivery) ReminderByID(reminderID string) (Reminder, bool) {
+	for _, reminder := range d.Reminders {
+		if strings.EqualFold(strings.TrimSpace(reminder.ID), strings.TrimSpace(reminderID)) {
+			return reminder, true
+		}
+	}
+
+	return Reminder{}, false
 }
 
 func (d ScheduledDelivery) RenderMessage(template string) string {

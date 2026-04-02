@@ -14,7 +14,7 @@ This folder holds the planning and operating notes for the Discord DM bot.
 - Runtime logs are written to `logs/` with daily rotation.
 - The scheduler checks for due messages every `runtime.poll_interval_seconds`.
 - Command usage is locked to `discord.guild_ids` and `discord.allowed_role_ids`.
-- Scheduler event notifications can be sent to a Discord webhook from `[notifications]`.
+- The bot can post admin status messages to `discord.admin_channel_id`.
 
 ## Recommended deployment pattern
 

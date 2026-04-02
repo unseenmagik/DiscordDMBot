@@ -8,6 +8,9 @@ guild_ids = ["123456789012345678"]
 # Only members with one of these role IDs can use the slash commands.
 allowed_role_ids = ["345678901234567890"]
 
+# Bot-owned admin channel for status posts and late reminder buttons.
+admin_channel_id = "456789012345678901"
+
 [runtime]
 # Timezone used when calculating scheduled reminder times.
 timezone = "Europe/London"
@@ -31,13 +34,6 @@ color = "#2B6CB0"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
 one_off_color = "#C53030"
-
-[notifications]
-# Optional Discord webhook for scheduler event notifications.
-discord_webhook_url = ""
-notify_sent = false
-notify_skipped = false
-notify_failed = false
 
 # Each [[deliveries]] block is one payment/reminder group for one user.
 # The user_id, due_date, due_time, frequency, and value below apply to every
@@ -69,6 +65,14 @@ title = "MPMaps Final Payment Reminder"
 days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
+
+# A manual-only late reminder. This is not scheduled automatically.
+# The bot can send it from the admin channel when the "Late reminder" button is used.
+[[deliveries.reminders]]
+id = "late"
+name = "Late Reminder"
+title = "MPMaps Late Payment Reminder"
+message = "Hello {{user}},\n\nYour payment is now overdue.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 
 # Start a new [[deliveries]] block when you want reminders for a different
 # user or a different payment/value.

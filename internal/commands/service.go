@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"discorddmbot/internal/admin"
 	"discorddmbot/internal/config"
 	"discorddmbot/internal/delivery"
+	"discorddmbot/internal/state"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -24,6 +26,7 @@ const (
 type Service struct {
 	session        *discordgo.Session
 	configStore    *config.Store
+	stateStore     *state.Store
 	logger         *log.Logger
 	guildIDs       map[string]struct{}
 	guildIDList    []string
@@ -38,7 +41,7 @@ func (e userFacingError) Error() string {
 	return e.message
 }
 
-func NewService(session *discordgo.Session, configStore *config.Store, logger *log.Logger, discordConfig config.Discord) *Service {
+func NewService(session *discordgo.Session, configStore *config.Store, stateStore *state.Store, logger *log.Logger, discordConfig config.Discord) *Service {
 	allowedRoleIDs := make(map[string]struct{}, len(discordConfig.AllowedRoleIDs))
 	for _, roleID := range discordConfig.AllowedRoleIDs {
 		allowedRoleIDs[roleID] = struct{}{}
@@ -52,6 +55,7 @@ func NewService(session *discordgo.Session, configStore *config.Store, logger *l
 	service := &Service{
 		session:        session,
 		configStore:    configStore,
+		stateStore:     stateStore,
 		logger:         logger,
 		guildIDs:       guildIDs,
 		guildIDList:    append([]string(nil), discordConfig.GuildIDs...),
@@ -73,7 +77,7 @@ func (s *Service) Register(applicationID string) error {
 }
 
 func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *discordgo.InteractionCreate) {
-	if interaction.Type != discordgo.InteractionApplicationCommand {
+	if interaction.Type != discordgo.InteractionApplicationCommand && interaction.Type != discordgo.InteractionMessageComponent {
 		return
 	}
 
@@ -88,19 +92,30 @@ func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *d
 	}
 
 	var err error
-	switch interaction.ApplicationCommandData().Name {
-	case commandSendNow:
-		err = s.handleSendNow(interaction)
-	case commandScheduleAdd:
-		err = s.handleScheduleAdd(interaction)
-	case commandScheduleView:
-		err = s.handleScheduleView(interaction)
+	switch interaction.Type {
+	case discordgo.InteractionApplicationCommand:
+		switch interaction.ApplicationCommandData().Name {
+		case commandSendNow:
+			err = s.handleSendNow(interaction)
+		case commandScheduleAdd:
+			err = s.handleScheduleAdd(interaction)
+		case commandScheduleView:
+			err = s.handleScheduleView(interaction)
+		default:
+			err = s.respondError(interaction.Interaction, "Unknown command.")
+		}
+	case discordgo.InteractionMessageComponent:
+		err = s.handleComponent(interaction)
 	default:
-		err = s.respondError(interaction.Interaction, "Unknown command.")
+		return
 	}
 
 	if err != nil {
-		s.logger.Printf("slash command %s failed: %v", interaction.ApplicationCommandData().Name, err)
+		name := "component"
+		if interaction.Type == discordgo.InteractionApplicationCommand {
+			name = interaction.ApplicationCommandData().Name
+		}
+		s.logger.Printf("interaction %s failed: %v", name, err)
 		var userErr userFacingError
 		responseMessage := "The command could not be completed. Check the bot logs for details."
 		if errors.As(err, &userErr) {
@@ -301,6 +316,122 @@ func (s *Service) handleScheduleView(interaction *discordgo.InteractionCreate) e
 	}
 
 	return s.respondEmbeds(interaction.Interaction, "", embeds)
+}
+
+func (s *Service) handleComponent(interaction *discordgo.InteractionCreate) error {
+	customID := interaction.MessageComponentData().CustomID
+	deliveryID, dueDate, ok := admin.ParseLateReminderCustomID(customID)
+	if !ok {
+		return userFacingError{message: "Unknown button action."}
+	}
+
+	return s.handleLateReminder(interaction, deliveryID, dueDate)
+}
+
+func (s *Service) handleLateReminder(interaction *discordgo.InteractionCreate, deliveryID, dueDate string) error {
+	cfg, err := s.configStore.Load()
+	if err != nil {
+		return err
+	}
+
+	if cfg.Discord.AdminChannelID == "" {
+		return userFacingError{message: "No admin channel is configured for late reminders."}
+	}
+	if interaction.ChannelID != cfg.Discord.AdminChannelID {
+		return userFacingError{message: "This button can only be used in the configured admin channel."}
+	}
+
+	deliveryGroup, ok := findDeliveryByID(cfg.Deliveries, deliveryID)
+	if !ok {
+		return userFacingError{message: "The delivery for this late reminder could not be found."}
+	}
+
+	lateReminder, ok := deliveryGroup.ReminderByID("late")
+	if !ok {
+		return userFacingError{message: "No late reminder is configured for this delivery."}
+	}
+
+	if _, err := time.Parse("2006-01-02", dueDate); err != nil {
+		return userFacingError{message: "This late reminder button contains an invalid due date."}
+	}
+
+	fileState, err := s.stateStore.Load()
+	if err != nil {
+		return err
+	}
+
+	stateKey := lateReminderStateKey(deliveryID, dueDate)
+	if _, exists := fileState.Deliveries[stateKey]; exists {
+		if err := s.disableComponentMessage(interaction); err != nil {
+			s.logger.Printf("disable late reminder button failed: %v", err)
+		}
+		return userFacingError{message: "This late reminder has already been sent."}
+	}
+
+	location, err := time.LoadLocation(cfg.Runtime.Timezone)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().In(location)
+	lateDelivery := config.ScheduledDelivery{
+		StateKey:      stateKey,
+		DeliveryID:    deliveryGroup.ID,
+		UserID:        deliveryGroup.UserID,
+		Value:         deliveryGroup.Value,
+		Message:       lateReminder.Message,
+		ScheduledAt:   now,
+		Date:          now.Format("2006-01-02"),
+		Time:          now.Format("15:04"),
+		DueDate:       dueDate,
+		DueTime:       deliveryGroup.DueTime,
+		Frequency:     deliveryGroup.Frequency,
+		ReminderID:    "late",
+		ReminderName:  lateReminder.Name,
+		Title:         lateReminder.Title,
+		DaysBeforeDue: 0,
+	}
+
+	message := lateDelivery.RenderMessage(cfg.Embed.DescriptionTemplate)
+	embed, err := delivery.BuildDeliveryEmbed(s.session, cfg, lateDelivery, message, now)
+	if err != nil {
+		return err
+	}
+
+	if err := delivery.SendEmbedDM(s.session, lateDelivery.UserID, embed); err != nil {
+		return userFacingError{message: fmt.Sprintf("I could not DM <@%s> with the late reminder.", lateDelivery.UserID)}
+	}
+
+	fileState.Deliveries[stateKey] = state.DeliveryRecord{
+		UserID:         lateDelivery.UserID,
+		Date:           lateDelivery.Date,
+		Time:           lateDelivery.Time,
+		DueDate:        lateDelivery.DueDate,
+		DueTime:        lateDelivery.DueTime,
+		ReminderName:   lateDelivery.ReminderName,
+		Value:          lateDelivery.Value,
+		Message:        message,
+		DeliveredAtUTC: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := s.stateStore.Save(fileState); err != nil {
+		delete(fileState.Deliveries, stateKey)
+		return err
+	}
+
+	if err := s.disableComponentMessage(interaction); err != nil {
+		s.logger.Printf("disable late reminder button failed: %v", err)
+	}
+
+	if err := admin.SendMessage(
+		s.session,
+		cfg.Discord.AdminChannelID,
+		admin.StatusEmbed("Late Reminder Sent", adminMessageBody(lateDelivery, "Status: Sent manually from admin action"), 0xC53030),
+		nil,
+	); err != nil {
+		s.logger.Printf("send admin late reminder status failed: %v", err)
+	}
+
+	return s.respondText(interaction.Interaction, fmt.Sprintf("Late reminder sent to <@%s>.", lateDelivery.UserID))
 }
 
 func applicationCommands() []*discordgo.ApplicationCommand {
@@ -629,6 +760,16 @@ func (s *Service) respondEmbeds(interaction *discordgo.Interaction, content stri
 	})
 }
 
+func (s *Service) respondText(interaction *discordgo.Interaction, content string) error {
+	return s.session.InteractionRespond(interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: content,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
 func boolLabel(value bool) string {
 	if value {
 		return "Yes"
@@ -667,6 +808,55 @@ func frequencyLabel(value string) string {
 	}
 
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func findDeliveryByID(deliveries []config.Delivery, deliveryID string) (config.Delivery, bool) {
+	for _, deliveryConfig := range deliveries {
+		if strings.TrimSpace(deliveryConfig.ID) == strings.TrimSpace(deliveryID) {
+			return deliveryConfig, true
+		}
+	}
+
+	return config.Delivery{}, false
+}
+
+func lateReminderStateKey(deliveryID, dueDate string) string {
+	return "late:" + strings.TrimSpace(deliveryID) + ":" + strings.TrimSpace(dueDate)
+}
+
+func adminMessageBody(deliveryConfig config.ScheduledDelivery, extraLines ...string) string {
+	lines := []string{
+		fmt.Sprintf("User: %s", deliveryConfig.UserMention()),
+		fmt.Sprintf("Value: **%s**", deliveryConfig.Value),
+		fmt.Sprintf("Reminder: **%s**", valueOrFallback(deliveryConfig.ReminderName, "Late Reminder")),
+		fmt.Sprintf("Due: **%s**", deliveryConfig.DueDisplay()),
+	}
+
+	for _, line := range extraLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (s *Service) disableComponentMessage(interaction *discordgo.InteractionCreate) error {
+	if interaction.Message == nil {
+		return nil
+	}
+
+	disabledComponents := admin.DisableComponents(interaction.Message.Components)
+	_, err := s.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		ID:         interaction.Message.ID,
+		Channel:    interaction.ChannelID,
+		Content:    &interaction.Message.Content,
+		Embeds:     &interaction.Message.Embeds,
+		Components: &disabledComponents,
+	})
+	return err
 }
 
 func (s *Service) memberHasAllowedRole(member *discordgo.Member) bool {

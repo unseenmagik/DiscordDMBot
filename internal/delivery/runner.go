@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"discorddmbot/internal/admin"
 	"discorddmbot/internal/config"
-	"discorddmbot/internal/notify"
 	"discorddmbot/internal/state"
 
 	"github.com/bwmarrin/discordgo"
@@ -19,17 +19,15 @@ type Runner struct {
 	configStore *config.Store
 	store       *state.Store
 	logger      *log.Logger
-	notifier    *notify.DiscordWebhook
 	notifyState map[string]string
 }
 
-func NewRunner(session *discordgo.Session, configStore *config.Store, statePath string, logger *log.Logger, notifier *notify.DiscordWebhook) *Runner {
+func NewRunner(session *discordgo.Session, configStore *config.Store, store *state.Store, logger *log.Logger) *Runner {
 	return &Runner{
 		session:     session,
 		configStore: configStore,
-		store:       state.NewStore(statePath),
+		store:       store,
 		logger:      logger,
-		notifier:    notifier,
 		notifyState: make(map[string]string),
 	}
 }
@@ -128,7 +126,7 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 			delete(r.notifyState, "skip:"+stateKey)
 			delete(r.notifyState, "fail:"+stateKey)
 			r.logger.Printf("delivered dm to user=%s guild=%s scheduled_at=%s", scheduledDelivery.UserID, guildID, scheduledAt.Format(time.RFC3339))
-			r.notifySent(cfg, scheduledDelivery, guildID)
+			r.notifySent(cfg, deliveryConfig, scheduledDelivery, guildID)
 		}
 	}
 
@@ -153,8 +151,8 @@ func deliverySendWindow(pollIntervalSeconds int) time.Duration {
 	return window
 }
 
-func (r *Runner) notifySent(cfg *config.Config, deliveryConfig config.ScheduledDelivery, guildID string) {
-	if !cfg.Notifications.NotifySent || r.notifier == nil || !r.notifier.Enabled() {
+func (r *Runner) notifySent(cfg *config.Config, deliveryGroup config.Delivery, deliveryConfig config.ScheduledDelivery, guildID string) {
+	if cfg.Discord.AdminChannelID == "" {
 		return
 	}
 
@@ -164,13 +162,24 @@ func (r *Runner) notifySent(cfg *config.Config, deliveryConfig config.ScheduledD
 		fmt.Sprintf("Guild: `%s`", guildID),
 	)
 
-	if err := r.notifier.Send("Reminder Sent", description, 0x2F855A, nil); err != nil {
-		r.logger.Printf("webhook notify sent failed: %v", err)
+	embed, err := statusEmbed("Reminder Sent", description, 0x2F855A)
+	if err != nil {
+		r.logger.Printf("build admin sent embed failed: %v", err)
+		return
+	}
+
+	var components []discordgo.MessageComponent
+	if shouldOfferLateReminder(deliveryGroup, deliveryConfig) {
+		components = admin.LateReminderComponents(deliveryConfig.DeliveryID, deliveryConfig.DueDate)
+	}
+
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, components); err != nil {
+		r.logger.Printf("admin notify sent failed: %v", err)
 	}
 }
 
 func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfig config.ScheduledDelivery, deliveredAtUTC string) {
-	if !cfg.Notifications.NotifySkipped || r.notifier == nil || !r.notifier.Enabled() {
+	if cfg.Discord.AdminChannelID == "" {
 		return
 	}
 
@@ -180,7 +189,7 @@ func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfi
 	}
 	r.notifyState[key] = deliveredAtUTC
 
-	if err := r.notifier.Send(
+	embed, err := statusEmbed(
 		"Reminder Skipped",
 		notificationBody(
 			deliveryConfig,
@@ -189,14 +198,19 @@ func (r *Runner) notifySkippedAlreadyDelivered(cfg *config.Config, deliveryConfi
 			fmt.Sprintf("Delivered At (UTC): `%s`", deliveredAtUTC),
 		),
 		0xDD6B20,
-		nil,
-	); err != nil {
-		r.logger.Printf("webhook notify skipped failed: %v", err)
+	)
+	if err != nil {
+		r.logger.Printf("build admin skipped embed failed: %v", err)
+		return
+	}
+
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, nil); err != nil {
+		r.logger.Printf("admin notify skipped failed: %v", err)
 	}
 }
 
 func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig config.ScheduledDelivery, now time.Time, sendWindow time.Duration) {
-	if !cfg.Notifications.NotifySkipped || r.notifier == nil || !r.notifier.Enabled() {
+	if cfg.Discord.AdminChannelID == "" {
 		return
 	}
 
@@ -207,7 +221,7 @@ func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig co
 	}
 	r.notifyState[key] = reason
 
-	if err := r.notifier.Send(
+	embed, err := statusEmbed(
 		"Reminder Skipped",
 		notificationBody(
 			deliveryConfig,
@@ -218,14 +232,19 @@ func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig co
 			fmt.Sprintf("Send Window: `%s`", sendWindow),
 		),
 		0xDD6B20,
-		nil,
-	); err != nil {
-		r.logger.Printf("webhook notify skipped failed: %v", err)
+	)
+	if err != nil {
+		r.logger.Printf("build admin skipped embed failed: %v", err)
+		return
+	}
+
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, nil); err != nil {
+		r.logger.Printf("admin notify skipped failed: %v", err)
 	}
 }
 
 func (r *Runner) notifyFailed(cfg *config.Config, deliveryConfig config.ScheduledDelivery, sendErr error) {
-	if !cfg.Notifications.NotifyFailed || r.notifier == nil || !r.notifier.Enabled() {
+	if cfg.Discord.AdminChannelID == "" {
 		return
 	}
 
@@ -236,7 +255,7 @@ func (r *Runner) notifyFailed(cfg *config.Config, deliveryConfig config.Schedule
 	}
 	r.notifyState[key] = reason
 
-	if err := r.notifier.Send(
+	embed, err := statusEmbed(
 		"Reminder Send Failed",
 		notificationBody(
 			deliveryConfig,
@@ -244,9 +263,14 @@ func (r *Runner) notifyFailed(cfg *config.Config, deliveryConfig config.Schedule
 			fmt.Sprintf("Reason: `%s`", reason),
 		),
 		0xC53030,
-		nil,
-	); err != nil {
-		r.logger.Printf("webhook notify failed failed: %v", err)
+	)
+	if err != nil {
+		r.logger.Printf("build admin failed embed failed: %v", err)
+		return
+	}
+
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, embed, nil); err != nil {
+		r.logger.Printf("admin notify failed failed: %v", err)
 	}
 }
 
@@ -286,4 +310,24 @@ func notificationBody(deliveryConfig config.ScheduledDelivery, extraLines ...str
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func statusEmbed(title, description string, color int) (*discordgo.MessageEmbed, error) {
+	return &discordgo.MessageEmbed{
+		Title:       title,
+		Description: description,
+		Color:       color,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func shouldOfferLateReminder(deliveryGroup config.Delivery, deliveryConfig config.ScheduledDelivery) bool {
+	if deliveryConfig.ReminderID != "final" {
+		return false
+	}
+	if strings.TrimSpace(deliveryConfig.DeliveryID) == "" {
+		return false
+	}
+	_, exists := deliveryGroup.ReminderByID("late")
+	return exists
 }

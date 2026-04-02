@@ -40,6 +40,7 @@ Example:
 bot_token = "replace-with-your-bot-token"
 guild_ids = ["123456789012345678"]
 allowed_role_ids = ["345678901234567890"]
+admin_channel_id = "456789012345678901"
 
 [runtime]
 timezone = "Europe/London"
@@ -55,12 +56,6 @@ color = "#2B6CB0"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
 one_off_color = "#C53030"
-
-[notifications]
-discord_webhook_url = ""
-notify_sent = false
-notify_skipped = false
-notify_failed = false
 
 [[deliveries]]
 id = "payment-reminder-001"
@@ -85,6 +80,12 @@ title = "MPMaps Final Payment Reminder"
 days_before_due = 1
 time = "09:00"
 message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** is due on **{{dueDate}}**."
+
+[[deliveries.reminders]]
+id = "late"
+name = "Late Reminder"
+title = "MPMaps Late Payment Reminder"
+message = "Hello {{user}},\n\nYour payment is now overdue.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 ```
 
 Set these first:
@@ -95,20 +96,14 @@ Set these first:
   The guild IDs where the bot is allowed to operate
 - `discord.allowed_role_ids`
   The role IDs allowed to use the slash commands
+- `discord.admin_channel_id`
+  Bot-owned admin channel for monitoring posts and late reminder buttons
 - `runtime.timezone`
   Timezone used for scheduled sends
 - `runtime.poll_interval_seconds`
   How often the bot checks for due deliveries
 - `runtime.send_missed_deliveries`
   If `true`, the bot will send old missed jobs after downtime; if `false`, it only sends inside the live schedule window
-- `notifications.discord_webhook_url`
-  Optional Discord webhook URL for scheduler event notifications
-- `notifications.notify_sent`
-  If `true`, post a webhook message when a scheduled DM is sent
-- `notifications.notify_skipped`
-  If `true`, post a webhook message when a delivery is skipped
-- `notifications.notify_failed`
-  If `true`, post a webhook message when a delivery fails to send
 
 For due-date reminder flows, each `[[deliveries]]` can contain:
 
@@ -120,6 +115,7 @@ For due-date reminder flows, each `[[deliveries]]` can contain:
 Each `[[deliveries.reminders]]` entry belongs to the `[[deliveries]]` block directly above it and uses that parent delivery's `user_id`, `value`, `due_date`, and `due_time`.
 
 Each reminder can also set an optional `title` to override the global `[embed].title` for that specific send.
+If you define a reminder with `id = "late"`, it is treated as a manual-only reminder and is not scheduled automatically.
 
 `frequency` is optional, but when you use it the only supported values are:
 
@@ -303,7 +299,9 @@ Formats:
 - Sent reminders are tracked in `data/delivery-state.json`
 - If a reminder was already delivered once, the scheduler will not send it again while the same state key still exists
 - During testing, reusing the same delivery ID, due date, and reminder ID can make the bot treat a reminder as already sent
-- Optional webhook notifications can also report `sent`, `skipped`, and `failed` scheduler events to a Discord channel
+- The bot can also post admin status messages in `discord.admin_channel_id`
+- When a `late` reminder exists and the `final` reminder is sent, the admin message includes a `Late reminder` button
+- Pressing that button sends the configured `late` reminder once and then disables the button
 
 ## Discord Notes
 

@@ -24,10 +24,12 @@ Build a production-friendly Discord bot that sends formatted Discord DM reminder
   - per-reminder message content
 - Guild lock to configured Discord guild IDs.
 - Role lock so only configured roles can use slash commands.
+- Bot-owned admin channel posts for monitoring sends, skips, failures, and late-reminder actions.
 - Shared embed styling with placeholder replacement.
 - Optional catch-up behavior for missed reminders after downtime.
 - Restart-safe delivery tracking to prevent duplicate sends.
 - Deployment guidance for a single compiled binary under PM2.
+- Manual late-reminder action triggered from an admin-channel button when configured.
 - Basic project documentation and example config files.
 
 ## Out of scope
