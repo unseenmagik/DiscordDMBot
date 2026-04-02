@@ -163,7 +163,7 @@ func (s *Service) handleSendNow(interaction *discordgo.InteractionCreate) error 
 	}
 
 	message := deliveryConfig.RenderMessage(cfg.Embed.DescriptionTemplate)
-	embed, err := delivery.BuildDeliveryEmbed(cfg, deliveryConfig, message, now)
+	embed, err := delivery.BuildDeliveryEmbed(s.session, cfg, deliveryConfig, message, now)
 	if err != nil {
 		return err
 	}

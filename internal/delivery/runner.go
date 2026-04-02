@@ -122,7 +122,7 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 }
 
 func (r *Runner) sendDM(cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) error {
-	embed, err := BuildDeliveryEmbed(cfg, deliveryConfig, message, scheduledAt)
+	embed, err := BuildDeliveryEmbed(r.session, cfg, deliveryConfig, message, scheduledAt)
 	if err != nil {
 		return err
 	}

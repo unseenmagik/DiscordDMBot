@@ -120,6 +120,7 @@ Each DM is sent as an embed with:
 - the configured embed title
 - the configured footer
 - the configured color
+- the bot avatar as the footer icon and thumbnail when available
 - the rendered description
 - automatic `Value` and `Due` fields
 

@@ -9,12 +9,13 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) (*discordgo.MessageEmbed, error) {
+func BuildDeliveryEmbed(session *discordgo.Session, cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) (*discordgo.MessageEmbed, error) {
 	color, err := config.ParseHexColor(cfg.Embed.Color)
 	if err != nil {
 		return nil, fmt.Errorf("parse embed color: %w", err)
 	}
 
+	avatarURL := botAvatarURL(session)
 	dueValue := scheduledAt.Format("2006-01-02 15:04 MST")
 	if deliveryConfig.DueDate != "" {
 		dueValue = deliveryConfig.DueDate
@@ -49,17 +50,30 @@ func BuildDeliveryEmbed(cfg *config.Config, deliveryConfig config.ScheduledDeliv
 		Description: message,
 		Color:       color,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: cfg.Embed.Footer,
+			Text:    cfg.Embed.Footer,
+			IconURL: avatarURL,
 		},
 		Fields:    fields,
+		Thumbnail: &discordgo.MessageEmbedThumbnail{URL: avatarURL},
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if cfg.Embed.Footer == "" {
 		embed.Footer = nil
 	}
+	if avatarURL == "" {
+		embed.Thumbnail = nil
+	}
 
 	return embed, nil
+}
+
+func botAvatarURL(session *discordgo.Session) string {
+	if session == nil || session.State == nil || session.State.User == nil {
+		return ""
+	}
+
+	return session.State.User.AvatarURL("256")
 }
 
 func SendEmbedDM(session *discordgo.Session, userID string, embed *discordgo.MessageEmbed) error {
