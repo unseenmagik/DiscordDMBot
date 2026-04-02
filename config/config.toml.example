@@ -1,0 +1,30 @@
+[discord]
+bot_token = "replace-with-your-bot-token"
+guild_ids = ["123456789012345678"]
+allowed_role_ids = ["345678901234567890"]
+
+[runtime]
+timezone = "Europe/London"
+poll_interval_seconds = 15
+state_path = "data/delivery-state.json"
+
+[embed]
+title = "Scheduled Reminder"
+description_template = "Hello, this is your scheduled message.\n\nYour value is: **{{value}}**"
+footer = "Sent automatically by the Discord DM Bot"
+color = "#2B6CB0"
+
+[[deliveries]]
+id = "invoice-reminder-001"
+user_id = "123456789012345678"
+date = "2026-04-15"
+time = "09:30"
+value = "INV-2026-001"
+
+[[deliveries]]
+id = "invoice-reminder-002"
+user_id = "234567890123456789"
+date = "2026-04-16"
+time = "14:45"
+message = "Hello,\n\nYour custom scheduled reminder is ready.\n\nReference: **{{value}}**"
+value = "INV-2026-002"
