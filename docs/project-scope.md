@@ -2,68 +2,104 @@
 
 ## Goal
 
-Build a production-friendly Discord bot that sends formatted Discord DM reminder embeds to specific users, with delivery rules controlled from a local TOML config file and managed through restricted slash commands.
+Deliver a production-friendly Discord bot that sends scheduled payment reminder embeds by DM, is operated from a local TOML config file, and gives admins enough in-Discord tooling to manage schedules safely without needing a web dashboard.
 
-## In scope
+## Current scope
 
-- Payment reminder scheduling grouped by `[[deliveries]]`, with nested `[[deliveries.reminders]]` entries.
-- Per-delivery reminder flows such as an initial reminder and a final reminder before the due date.
-- Legacy one-off delivery support for compatibility while the project moves toward reminder-based scheduling.
-- Admin slash commands for:
+- Reminder-based delivery groups stored under `[[deliveries]]` with nested `[[deliveries.reminders]]`.
+- Reminder flows that support:
+  - `initial`
+  - `final`
+  - `due`
+  - `late` as a manual-only reminder
+- Legacy one-off delivery support using `date` and `time`.
+- Recurring due-date schedules using:
+  - `once`
+  - `daily`
+  - `weekly`
+  - `bi-weekly`
+  - `monthly`
+- Shared embed presentation config in `[embed]`, with reminder-specific color overrides and placeholder replacement.
+- Per-reminder title and message overrides.
+- Slash-command administration for:
   - immediate test sends
-  - adding new reminder schedules to config
-  - viewing parsed config state as embeds
-- Config-driven scheduling with:
-  - Discord user ID
-  - due date and optional due time
-  - optional recurring frequency
-    supports once, daily, weekly, bi-weekly, and monthly today
-  - value/reference
-  - per-reminder day offsets
-  - per-reminder send times
-  - per-reminder message content
-- Guild lock to configured Discord guild IDs.
-- Role lock so only configured roles can use slash commands.
-- Bot-owned admin channel posts for monitoring sends, skips, failures, and late-reminder actions.
-- Shared embed styling with placeholder replacement.
-- Optional catch-up behavior for missed reminders after downtime.
-- Restart-safe delivery tracking to prevent duplicate sends.
-- Deployment guidance for a single compiled binary under PM2.
-- Manual late-reminder action triggered from an admin-channel button when configured.
-- Basic project documentation and example config files.
+  - manual reminder resend
+  - schedule creation
+  - schedule editing
+  - schedule viewing
+  - delivery ID listing
+  - schedule removal
+  - delivery-state clearing for testing and recovery
+- Guild lock to configured `discord.guild_ids`.
+- Role lock to configured `discord.allowed_role_ids`.
+- Admin-channel monitoring through `discord.admin_channel_id`, including:
+  - successful reminder sends
+  - skipped missed-window notifications
+  - failed send notifications
+  - config-change applied notifications
+  - due-day posts with a `Late reminder` button when a `late` reminder exists
+- Restart-safe delivery tracking in `data/delivery-state.json`.
+- Config hot reload during scheduler polling.
+- Config validation mode using `--check-config`.
+- Runtime logs with daily rotation under `logs/`.
+- Single-binary deployment under PM2.
+- Repository automation with a GitHub Actions workflow for Discord notifications using a GitHub secret-backed webhook.
 
-## Out of scope
+## Operator workflow in scope
 
-- Recurring schedules.
-- Admin dashboard or web UI.
-- Database-backed history.
-- Multi-tenant bot management.
-- Full in-Discord schedule editing and deletion workflows.
-- Advanced retry queues or dead-letter processing.
+- Copy `config/config.toml.example` to `config/config.toml`.
+- Configure bot token, guild restrictions, allowed roles, admin channel, embed defaults, and delivery groups.
+- Validate config with `./bin/discord-dm-bot --check-config`.
+- Run the compiled bot under PM2.
+- Manage schedules from Discord using slash commands for add, edit, inspect, resend, remove, and state reset tasks.
 
 ## Technical decisions
 
 - Language: Go
-  - chosen for low runtime overhead, simple deployment, and strong fit for long-running services
+  - chosen for low runtime overhead, simple deployment, and strong fit for a long-running scheduler/service
 - Discord integration: `discordgo`
-  - used for slash commands, guild/member checks, and DM delivery
-- Config storage: TOML file
-  - stores Discord settings, runtime settings, embed settings, and delivery definitions in one readable config document
-- Config layout:
+  - used for slash commands, interaction handling, guild checks, admin-channel posts, and DM delivery
+- Config storage: TOML
+  - keeps operational settings and delivery definitions in one human-readable file
+- Config file layout:
   - committed example file at `config/config.toml.example`
-  - real local file at `config/config.toml`, kept out of git
-- State storage: JSON file on disk
-  - enough for a single-server deployment
-- Schedule expansion model:
-  - reminder-based deliveries are expanded into concrete scheduled sends at runtime using the configured timezone
+  - real local file at `config/config.toml`, excluded from git
+- Delivery state storage: JSON on disk
+  - sufficient for the current single-instance deployment model
+- Scheduler model:
+  - reminder-based schedules are expanded into concrete occurrences at runtime using the configured timezone
+- Admin interaction model:
+  - the bot posts its own monitoring messages in the admin channel rather than relying on Discord webhooks for bot operations
+
+## Security and operational assumptions
+
+- The bot only sends to users it can confirm are members of at least one configured guild.
+- The bot does not expose an inbound HTTP server or arbitrary command execution surface.
+- Secrets are expected to remain in the untracked local `config/config.toml`.
+- The server is assumed to be a trusted host managed by the operator.
+- PM2 is used only to supervise the compiled binary, not to store runtime config values.
+
+## Explicitly out of scope
+
+- A web dashboard or browser-based admin UI.
+- Admin dashboard or web UI.
+- Database-backed persistence.
+- Database-backed history.
+- Multi-tenant or multi-customer bot hosting.
+- Multi-tenant bot management.
+- Cross-server user discovery outside configured guild membership.
+- Automatic overdue escalation beyond the configured reminder model and manual late-reminder action.
+- Arbitrary custom recurrence rules beyond the supported frequency set.
+- Full analytics, reporting, or payment reconciliation.
+- High-availability distributed scheduling.
+- Advanced retry queues or dead-letter processing.
 
 ## Success criteria
 
-- A server operator can copy `config/config.toml.example` to `config/config.toml`, fill in Discord credentials and guild/role restrictions, and define reminder schedules without code changes.
-- A delivery group can define one payment due date and multiple reminders, each with its own message and send time.
-- Slash commands only work inside configured guilds and only for members with configured allowed roles.
-- The bot only sends to users that it can confirm are members of at least one configured guild.
-- The scheduler can either skip or catch up missed reminders after downtime based on config.
-- The bot can be restarted without resending completed reminder sends.
-- The PM2 ecosystem file is used only to start the compiled binary, not to hold runtime settings.
-- The process runs cleanly under PM2 as a single long-running service.
+- A server operator can configure and run the bot without changing application code.
+- Reminder groups can define multiple messages around one due date and optional recurrence.
+- Admin access is limited to configured guilds and allowed roles.
+- The bot can be restarted without resending completed reminders.
+- Operators can test, resend, inspect, remove, and reset schedules from Discord itself.
+- The admin channel provides enough visibility to monitor real sends, actionable failures, and applied config changes.
+- The repository is safe to publish with only example config tracked and real secrets excluded.
