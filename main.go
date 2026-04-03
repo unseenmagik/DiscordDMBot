@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -20,10 +22,14 @@ import (
 )
 
 func main() {
+	flagSet := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	configPath := flagSet.String("config", "config/config.toml", "Path to the TOML config file.")
+	checkConfig := flagSet.Bool("check-config", false, "Validate the config file and exit without starting the bot.")
+	flagSet.Parse(os.Args[1:])
+
 	logger := log.New(os.Stdout, "", log.Ldate|log.Ltime|log.LUTC)
 
-	configPath := "config/config.toml"
-	configStore := config.NewStore(configPath)
+	configStore := config.NewStore(*configPath)
 	appConfig, err := configStore.Load()
 	if err != nil {
 		logger.Fatalf("load config: %v", err)
@@ -32,6 +38,24 @@ func main() {
 	location, err := time.LoadLocation(appConfig.Runtime.Timezone)
 	if err != nil {
 		logger.Fatalf("load runtime timezone: %v", err)
+	}
+
+	if *checkConfig {
+		scheduledSends, err := countScheduledDeliveries(appConfig, location)
+		if err != nil {
+			logger.Fatalf("check config: %v", err)
+		}
+		fmt.Fprintf(
+			os.Stdout,
+			"config ok: path=%s timezone=%s guild_scope=%s deliveries=%d scheduled_sends=%d state=%s\n",
+			*configPath,
+			appConfig.Runtime.Timezone,
+			strings.Join(appConfig.Discord.GuildIDs, ","),
+			len(appConfig.Deliveries),
+			scheduledSends,
+			appConfig.Runtime.StatePath,
+		)
+		return
 	}
 
 	logger, logCloser, err := logging.NewLogger("logs", "discord-dm-bot", location)
@@ -66,7 +90,7 @@ func main() {
 
 	logger.Printf(
 		"discord dm bot is ready; config=%s state=%s guild_scope=%s",
-		configPath,
+		*configPath,
 		appConfig.Runtime.StatePath,
 		strings.Join(appConfig.Discord.GuildIDs, ","),
 	)
@@ -87,4 +111,18 @@ func main() {
 			logger.Fatalf("runner stopped with error: %v", err)
 		}
 	}
+}
+
+func countScheduledDeliveries(appConfig *config.Config, location *time.Location) (int, error) {
+	now := time.Now().In(location)
+	total := 0
+	for _, deliveryConfig := range appConfig.Deliveries {
+		scheduledDeliveries, err := deliveryConfig.ExpandAt(location, now)
+		if err != nil {
+			return 0, err
+		}
+		total += len(scheduledDeliveries)
+	}
+
+	return total, nil
 }

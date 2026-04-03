@@ -232,6 +232,20 @@ For a quick test:
 
 If startup is correct, the bot will validate the token, register slash commands in the configured guilds, and begin polling for scheduled deliveries.
 
+To validate the config without starting the bot:
+
+```bash
+./bin/discord-dm-bot --check-config
+```
+
+You can also point it at a different file:
+
+```bash
+./bin/discord-dm-bot --check-config --config /path/to/config.toml
+```
+
+If the config is valid, the command exits successfully and prints a short summary.
+
 ## PM2 Setup
 
 Copy the example file if needed:
@@ -296,6 +310,7 @@ After pulling new changes on the server:
 ```bash
 go mod tidy
 go build -o bin/discord-dm-bot .
+./bin/discord-dm-bot --check-config
 pm2 restart discord-dm-bot
 ```
 

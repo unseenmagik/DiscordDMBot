@@ -16,6 +16,7 @@ This folder holds the planning and operating notes for the Discord DM bot.
 - Command usage is locked to `discord.guild_ids` and `discord.allowed_role_ids`.
 - The bot can post admin status messages to `discord.admin_channel_id`.
 - The running bot also posts an admin message when it detects and applies config changes from disk.
+- `./bin/discord-dm-bot --check-config` validates the TOML file without starting the bot.
 
 ## Recommended deployment pattern
 
