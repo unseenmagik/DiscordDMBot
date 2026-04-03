@@ -24,8 +24,7 @@ jobs:
           REPO="${{ github.repository }}"
           ACTOR="${{ github.actor }}"
 
-          URL=""
-          TEXT=""
+          TEXT="GitHub event in $REPO by $ACTOR"
 
           if [ "$EVENT" = "pull_request" ]; then
             URL="${{ github.event.pull_request.html_url }}"
@@ -49,8 +48,6 @@ jobs:
           elif [ "$EVENT" = "push" ]; then
             URL="https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}"
             TEXT="Push to $REPO by $ACTOR on ${{ github.ref_name }}: $URL"
-          else
-            TEXT="GitHub event in $REPO by $ACTOR"
           fi
 
           {
@@ -60,9 +57,21 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Send to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          MESSAGE_TEXT: ${{ steps.msg.outputs.text }}
         shell: bash
         run: |
-          jq -n --arg content "${{ steps.msg.outputs.text }}" '{content: $content}' \
-          | curl -H "Content-Type: application/json" \
-                 -d @- \
-                 "${{ secrets.DISCORD_WEBHOOK }}"
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK secret is empty"
+            exit 1
+          fi
+
+          echo "Webhook length: ${#DISCORD_WEBHOOK}"
+
+          jq -n --arg content "$MESSAGE_TEXT" '{content: $content}' > payload.json
+
+          curl --fail --show-error --silent \
+            -H "Content-Type: application/json" \
+            -d @payload.json \
+            "$DISCORD_WEBHOOK"
