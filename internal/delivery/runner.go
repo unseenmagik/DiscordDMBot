@@ -216,7 +216,9 @@ func (r *Runner) notifySent(cfg *config.Config, deliveryGroup config.Delivery, d
 		components = admin.LateReminderComponents(deliveryConfig.DeliveryID, deliveryConfig.DueDate)
 	}
 
-	content := fmt.Sprintf("Sent to %s | Reminder: %s | Due: %s | Guild: `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), guildID)
+	content := buildAdminStatusContent("Reminder Delivered", deliveryConfig,
+		fmt.Sprintf("Guild: `%s`", guildID),
+	)
 	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, components); err != nil {
 		r.logger.Printf("admin notify sent failed: %v", err)
 	}
@@ -246,7 +248,12 @@ func (r *Runner) notifySkippedMissedWindow(cfg *config.Config, deliveryConfig co
 		return
 	}
 
-	content := fmt.Sprintf("Skipped for %s | Reminder: %s | Due: %s | Reason: send window expired at `%s` (window `%s`)", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), now.Format(time.RFC3339), sendWindow)
+	content := buildAdminStatusContent(
+		"Reminder Skipped",
+		deliveryConfig,
+		fmt.Sprintf("Reason: send window expired at `%s`", now.Format(time.RFC3339)),
+		fmt.Sprintf("Window: `%s`", sendWindow),
+	)
 	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
 		r.logger.Printf("admin notify skipped failed: %v", err)
 	}
@@ -271,7 +278,11 @@ func (r *Runner) notifyFailed(cfg *config.Config, deliveryConfig config.Schedule
 		return
 	}
 
-	content := fmt.Sprintf("Failed for %s | Reminder: %s | Due: %s | Reason: `%s`", deliveryConfig.UserMention(), reminderValue(deliveryConfig), dueValue(deliveryConfig), reason)
+	content := buildAdminStatusContent(
+		"Reminder Failed",
+		deliveryConfig,
+		fmt.Sprintf("Reason: `%s`", reason),
+	)
 	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
 		r.logger.Printf("admin notify failed failed: %v", err)
 	}
@@ -294,6 +305,25 @@ func reminderValue(deliveryConfig config.ScheduledDelivery) string {
 	}
 
 	return deliveryConfig.ReminderName
+}
+
+func buildAdminStatusContent(title string, deliveryConfig config.ScheduledDelivery, extraLines ...string) string {
+	lines := []string{
+		"**" + strings.TrimSpace(title) + "**",
+		fmt.Sprintf("User: %s", deliveryConfig.UserMention()),
+		fmt.Sprintf("Reminder: %s", reminderValue(deliveryConfig)),
+		fmt.Sprintf("Due: %s", dueValue(deliveryConfig)),
+	}
+
+	for _, line := range extraLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func shouldOfferLateReminder(deliveryGroup config.Delivery, deliveryConfig config.ScheduledDelivery) bool {

@@ -280,7 +280,7 @@ func (s *Service) handleReminderResend(interaction *discordgo.InteractionCreate)
 	}
 
 	if cfg.Discord.AdminChannelID != "" {
-		content := fmt.Sprintf("Manual resend to %s | Reminder: %s | Due: %s", resendDelivery.UserMention(), valueOrFallback(resendDelivery.ReminderName, reminderID), resendDelivery.DueDisplay())
+		content := buildAdminManualResendContent(resendDelivery, reminderID)
 		if err := admin.SendMessage(s.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
 			s.logger.Printf("send admin manual resend status failed: %v", err)
 		}
@@ -353,7 +353,7 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 
 	confirmation := &discordgo.MessageEmbed{
 		Title:       "Schedule Saved",
-		Description: "The payment reminder schedule was written to the config file and will be picked up by the scheduler automatically.",
+		Description: "The schedule was saved to `config/config.toml` and will be picked up automatically on the next poll.",
 		Color:       color,
 		Fields: []*discordgo.MessageEmbedField{
 			{
@@ -530,7 +530,7 @@ func (s *Service) handleScheduleEdit(interaction *discordgo.InteractionCreate) e
 
 	confirmation := &discordgo.MessageEmbed{
 		Title:       "Schedule Updated",
-		Description: "The payment reminder schedule was updated in the config file.",
+		Description: "The schedule was updated in `config/config.toml`.",
 		Color:       color,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: editedDelivery.ID, Inline: true},
@@ -582,7 +582,7 @@ func (s *Service) handleScheduleRemove(interaction *discordgo.InteractionCreate)
 
 	confirmation := &discordgo.MessageEmbed{
 		Title:       "Schedule Removed",
-		Description: "The payment reminder schedule was removed from the config file. The scheduler will stop using it on the next poll.",
+		Description: "The schedule was removed from `config/config.toml`. The scheduler will stop using it on the next poll.",
 		Color:       color,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: deliveryID, Inline: true},
@@ -669,7 +669,7 @@ func (s *Service) handleStateClear(interaction *discordgo.InteractionCreate) err
 
 	confirmation := &discordgo.MessageEmbed{
 		Title:       "State Cleared",
-		Description: "Saved delivery state was cleared. Matching reminders can now send again if the scheduler sees them as due.",
+		Description: "Saved send-state was cleared. Matching reminders can send again when you test or when the scheduler reaches them.",
 		Color:       color,
 		Fields: []*discordgo.MessageEmbedField{
 			{Name: "ID", Value: deliveryID, Inline: true},
@@ -805,7 +805,7 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 	return []*discordgo.ApplicationCommand{
 		{
 			Name:         commandSendNow,
-			Description:  "Send the configured embed to a user immediately.",
+			Description:  "Send a reminder embed to a user immediately.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
@@ -817,7 +817,7 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "value",
-					Description: "Value to inject into the embed template.",
+					Description: "Value to place into the embed template.",
 					Required:    true,
 				},
 				{
@@ -835,26 +835,26 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "message",
-					Description: "Optional custom embed description override.",
+					Description: "Optional description override for this send.",
 					Required:    false,
 				},
 			},
 		},
 		{
 			Name:         commandReminderResend,
-			Description:  "Manually resend a configured reminder now.",
+			Description:  "Manually resend a configured reminder right now.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "id",
-					Description: "Existing delivery id to resend a reminder from.",
+					Description: "Configured delivery id to resend from.",
 					Required:    true,
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "reminder_id",
-					Description: "Reminder to resend now.",
+					Description: "Reminder to send now.",
 					Required:    true,
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
 						{Name: "initial", Value: "initial"},
@@ -866,14 +866,14 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "due_date",
-					Description: "Optional due date in YYYY-MM-DD format. Required for recurring deliveries.",
+					Description: "Due date in YYYY-MM-DD format. Required for recurring deliveries.",
 					Required:    false,
 				},
 			},
 		},
 		{
 			Name:         commandScheduleAdd,
-			Description:  "Add a payment schedule with initial and final reminders.",
+			Description:  "Create a payment reminder schedule.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
@@ -891,7 +891,7 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "value",
-					Description: "Value to inject into the embed template.",
+					Description: "Value to place into the embed template.",
 					Required:    true,
 				},
 				{
@@ -952,20 +952,20 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "id",
-					Description: "Optional stable payment schedule ID.",
+					Description: "Optional stable schedule ID.",
 					Required:    false,
 				},
 			},
 		},
 		{
 			Name:         commandScheduleEdit,
-			Description:  "Edit an existing payment schedule and its reminder messages.",
+			Description:  "Edit a saved payment schedule and its reminders.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "id",
-					Description: "Existing delivery id to edit.",
+					Description: "Configured delivery id to edit.",
 					Required:    true,
 				},
 				{
@@ -1093,31 +1093,31 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:         commandScheduleRemove,
-			Description:  "Remove a payment schedule by id and clear its saved delivery state.",
+			Description:  "Delete a payment schedule by id and clear its saved state.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "id",
-					Description: "Existing delivery id to remove.",
+					Description: "Configured delivery id to remove.",
 					Required:    true,
 				},
 			},
 		},
 		{
 			Name:         commandScheduleListIDs,
-			Description:  "List configured delivery ids for quick admin reference.",
+			Description:  "List saved delivery ids for quick admin reference.",
 			DMPermission: &dmPermission,
 		},
 		{
 			Name:         commandStateClear,
-			Description:  "Clear saved delivery state so a schedule or reminder can be sent again.",
+			Description:  "Clear saved send-state for testing or retries.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "id",
-					Description: "Existing delivery id to clear saved state for.",
+					Description: "Configured delivery id to clear state for.",
 					Required:    true,
 				},
 				{
@@ -1142,7 +1142,7 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:         commandScheduleView,
-			Description:  "Read the current config as parsed embed pages.",
+			Description:  "Show configured schedules from the TOML file.",
 			DMPermission: &dmPermission,
 			Options: []*discordgo.ApplicationCommandOption{
 				{
@@ -1184,16 +1184,16 @@ func buildScheduleEmbeds(cfg *config.Config, filterID string) ([]*discordgo.Mess
 		configuredReminderCount += len(deliveryConfig.Reminders)
 	}
 
-	title := "Configured Schedule"
+	title := "Configured Schedules"
 	if filterID != "" {
-		title = fmt.Sprintf("Configured Schedule: %s", filterID)
+		title = fmt.Sprintf("Schedule Details: %s", filterID)
 	}
 
 	embeds := []*discordgo.MessageEmbed{
 		{
 			Title: title,
 			Description: fmt.Sprintf(
-				"Timezone: `%s`\nPoll Interval: `%d seconds`\nGuild Scope: `%s`\nState Path: `%s`\nDelivery Groups: `%d`\nConfigured Reminders: `%d`\nExpanded Sends This Cycle: `%d`",
+				"Timezone: `%s`\nPoll Interval: `%d seconds`\nGuild Scope: `%s`\nState Path: `%s`\nDelivery Groups: `%d`\nConfigured Reminders: `%d`\nExpanded Occurrences: `%d`",
 				cfg.Runtime.Timezone,
 				cfg.Runtime.PollIntervalSeconds,
 				strings.Join(cfg.Discord.GuildIDs, ", "),
@@ -1226,7 +1226,7 @@ func buildScheduleEmbeds(cfg *config.Config, filterID string) ([]*discordgo.Mess
 
 	if len(visibleGroups) == 0 {
 		embeds[0].Fields = append(embeds[0].Fields, &discordgo.MessageEmbedField{
-			Name:   "Deliveries",
+			Name:   "Schedules",
 			Value:  "No matching deliveries are currently configured.",
 			Inline: false,
 		})
@@ -1250,57 +1250,15 @@ func buildScheduleEmbeds(cfg *config.Config, filterID string) ([]*discordgo.Mess
 		}
 
 		pageEmbed := &discordgo.MessageEmbed{
-			Title:     fmt.Sprintf("Configured Deliveries %d/%d", page+1, totalPages),
+			Title:     fmt.Sprintf("Delivery Groups %d/%d", page+1, totalPages),
 			Color:     color,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 
 		for index, deliveryConfig := range displayGroups[start:end] {
-			label := strings.TrimSpace(deliveryConfig.ID)
-			if label == "" {
-				if deliveryConfig.DueDate != "" {
-					label = fmt.Sprintf("user:%s due:%s", deliveryConfig.UserID, deliveryConfig.DueDate)
-				} else {
-					label = fmt.Sprintf("user:%s at:%s %s", deliveryConfig.UserID, deliveryConfig.Date, deliveryConfig.Time)
-				}
-			}
-
-			fieldLines := []string{
-				fmt.Sprintf("User: <@%s>", deliveryConfig.UserID),
-				fmt.Sprintf("Value: `%s`", deliveryConfig.Value),
-			}
-
-			if deliveryConfig.DueDate != "" {
-				fieldLines = append(fieldLines,
-					fmt.Sprintf("Payment Due: %s", dueLine(deliveryConfig)),
-					fmt.Sprintf("Frequency: %s", frequencyLabel(deliveryConfig.Frequency)),
-				)
-			} else {
-				fieldLines = append(fieldLines,
-					fmt.Sprintf("When: %s %s", deliveryConfig.Date, deliveryConfig.Time),
-					fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
-				)
-			}
-
-			if len(deliveryConfig.Reminders) > 0 {
-				reminderLines := make([]string, 0, len(deliveryConfig.Reminders))
-				for _, reminder := range deliveryConfig.Reminders {
-					line := valueOrFallback(reminder.ID, reminder.Name)
-					if reminder.ManualOnly() {
-						line += " (manual)"
-					} else {
-						line += fmt.Sprintf(" - %d days before at %s", reminder.DaysBeforeDue, reminder.Time)
-					}
-					reminderLines = append(reminderLines, line)
-				}
-				fieldLines = append(fieldLines, "Reminders: "+strings.Join(reminderLines, "\n"))
-			}
-
-			fieldValue := strings.Join(fieldLines, "\n")
-
 			pageEmbed.Fields = append(pageEmbed.Fields, &discordgo.MessageEmbedField{
-				Name:   fmt.Sprintf("%d. %s", start+index+1, trimForField(label, 240)),
-				Value:  trimForField(fieldValue, 1024),
+				Name:   fmt.Sprintf("%d. %s", start+index+1, trimForField(displayDeliveryLabel(deliveryConfig, start+index), 240)),
+				Value:  trimForField(strings.Join(scheduleGroupSummaryLines(deliveryConfig), "\n"), 1024),
 				Inline: false,
 			})
 		}
@@ -1311,8 +1269,8 @@ func buildScheduleEmbeds(cfg *config.Config, filterID string) ([]*discordgo.Mess
 	if truncated {
 		lastEmbed := embeds[len(embeds)-1]
 		lastEmbed.Fields = append(lastEmbed.Fields, &discordgo.MessageEmbedField{
-			Name:   "More Deliveries",
-			Value:  fmt.Sprintf("Only the first %d deliveries are shown in this response.", maxVisibleDeliveries),
+			Name:   "More Schedules",
+			Value:  fmt.Sprintf("Only the first %d delivery groups are shown in this response.", maxVisibleDeliveries),
 			Inline: false,
 		})
 	}
@@ -1380,7 +1338,7 @@ func buildScheduleIDEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error
 	if truncated {
 		lastEmbed := embeds[len(embeds)-1]
 		lastEmbed.Fields = append(lastEmbed.Fields, &discordgo.MessageEmbedField{
-			Name:   "More Deliveries",
+			Name:   "More Schedules",
 			Value:  fmt.Sprintf("Only the first %d delivery groups are shown in this response.", maxVisibleDeliveries),
 			Inline: false,
 		})
@@ -1539,6 +1497,17 @@ func valueOrFallback(value, fallback string) string {
 	return value
 }
 
+func buildAdminManualResendContent(deliveryConfig config.ScheduledDelivery, reminderID string) string {
+	lines := []string{
+		"**Reminder Resent Manually**",
+		fmt.Sprintf("User: %s", deliveryConfig.UserMention()),
+		fmt.Sprintf("Reminder: %s", valueOrFallback(deliveryConfig.ReminderName, reminderID)),
+		fmt.Sprintf("Due: %s", deliveryConfig.DueDisplay()),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func displayDeliveryLabel(deliveryConfig config.Delivery, index int) string {
 	if strings.TrimSpace(deliveryConfig.ID) != "" {
 		return deliveryConfig.ID
@@ -1557,13 +1526,13 @@ func scheduleGroupSummaryLines(deliveryConfig config.Delivery) []string {
 
 	if deliveryConfig.DueDate != "" {
 		lines = append(lines,
-			fmt.Sprintf("Payment Due: %s", dueLine(deliveryConfig)),
+			fmt.Sprintf("Due: %s", dueLine(deliveryConfig)),
 			fmt.Sprintf("Frequency: %s", frequencyLabel(deliveryConfig.Frequency)),
 		)
 	} else {
 		lines = append(lines,
 			fmt.Sprintf("When: %s %s", deliveryConfig.Date, deliveryConfig.Time),
-			fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
+			fmt.Sprintf("Custom Text: %s", boolLabel(deliveryConfig.Message != "")),
 		)
 	}
 
@@ -1578,7 +1547,7 @@ func scheduleGroupSummaryLines(deliveryConfig config.Delivery) []string {
 			}
 			reminderLines = append(reminderLines, line)
 		}
-		lines = append(lines, "Reminders: "+strings.Join(reminderLines, "\n"))
+		lines = append(lines, "Reminders:\n"+strings.Join(reminderLines, "\n"))
 	}
 
 	return lines

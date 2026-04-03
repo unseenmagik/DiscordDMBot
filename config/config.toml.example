@@ -29,6 +29,8 @@ state_path = "data/delivery-state.json"
 # Shared embed styling used for reminder sends.
 # This section controls the default look of the embeds the bot sends.
 # It does not schedule messages by itself.
+# `config_change_color` is only used for the admin-channel
+# "Config Changes Applied" status embed.
 title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
@@ -74,6 +76,7 @@ message = "Hello,\n\nThis is your **final reminder** that payment **{{value}}** 
 
 # This is the on-the-day reminder and is the admin post that gets the
 # "Late reminder" button when a matching `late` reminder exists.
+# If you want an on-the-day message, keep `id = "due"` with `days_before_due = 0`.
 [[deliveries.reminders]]
 id = "due"
 name = "Due Reminder"
@@ -85,6 +88,7 @@ message = "Hello {{user}},\n\nYour payment is due today.\n\nValue: **{{value}}**
 # A manual-only late reminder. This is not scheduled automatically.
 # The bot can send it from the admin channel when the "Late reminder" button is used
 # on the `due` reminder admin post.
+# This is useful when payment has still not been made after the due-day send.
 [[deliveries.reminders]]
 id = "late"
 name = "Late Reminder"

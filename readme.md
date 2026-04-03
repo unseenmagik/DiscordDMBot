@@ -1,6 +1,6 @@
 # Discord DM Bot
 
-A Go-based Discord bot for sending scheduled DM embeds to specific users, with slash commands for immediate sends, adding schedules, and viewing config state.
+A Go-based Discord bot for sending scheduled payment reminder embeds to specific Discord users, with slash commands for everyday admin operations.
 
 ## What It Does
 
@@ -30,6 +30,14 @@ cp config/config.toml.example config/config.toml
 ```
 
 Then edit `config/config.toml`.
+
+Recommended first-run flow:
+
+```bash
+cp config/config.toml.example config/config.toml
+go build -o bin/discord-dm-bot .
+./bin/discord-dm-bot --check-config
+```
 
 ## Config
 
@@ -367,6 +375,17 @@ Examples:
 `/schedule-view` now lists all configured top-level delivery groups from the config file by default. You can also pass an `id` to inspect one delivery on its own.
 
 `/schedule-list-ids` gives you a compact admin list of configured delivery IDs and their basic details so you can quickly choose the right `id` for edit, remove, resend, or state-clear actions.
+
+## Admin Workflow
+
+A practical admin flow usually looks like this:
+
+- `/schedule-add` to create the schedule
+- `/schedule-view` or `/schedule-list-ids` to confirm what is loaded
+- `/schedule-edit` if you need to adjust wording, dates, or reminder timing
+- `/state-clear` when you need to re-test a reminder
+- `/reminder-resend` when you want to send one configured reminder immediately
+- `/schedule-remove` when the schedule is no longer needed
 
 ## Security Notes
 
