@@ -25,6 +25,12 @@ type FileState struct {
 	Deliveries map[string]DeliveryRecord `json:"deliveries"`
 }
 
+type ClearFilter struct {
+	DeliveryID string
+	ReminderID string
+	DueDate    string
+}
+
 type Store struct {
 	path string
 	mu   sync.Mutex
@@ -49,6 +55,10 @@ func (s *Store) Save(fileState *FileState) error {
 }
 
 func (s *Store) ClearForDeliveryID(deliveryID string) (int, error) {
+	return s.ClearMatching(ClearFilter{DeliveryID: deliveryID})
+}
+
+func (s *Store) ClearMatching(filter ClearFilter) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,8 +68,8 @@ func (s *Store) ClearForDeliveryID(deliveryID string) (int, error) {
 	}
 
 	removed := 0
-	for stateKey := range fileState.Deliveries {
-		if belongsToDeliveryID(stateKey, deliveryID) {
+	for stateKey, record := range fileState.Deliveries {
+		if matchesFilter(stateKey, record, filter) {
 			delete(fileState.Deliveries, stateKey)
 			removed++
 		}
@@ -131,4 +141,36 @@ func belongsToDeliveryID(stateKey, deliveryID string) bool {
 	return strings.HasPrefix(stateKey, "custom:"+deliveryID) ||
 		strings.HasPrefix(stateKey, "reminder:"+deliveryID+":") ||
 		strings.HasPrefix(stateKey, "late:"+deliveryID+":")
+}
+
+func matchesFilter(stateKey string, record DeliveryRecord, filter ClearFilter) bool {
+	deliveryID := strings.TrimSpace(filter.DeliveryID)
+	if deliveryID == "" || !belongsToDeliveryID(stateKey, deliveryID) {
+		return false
+	}
+
+	reminderID := strings.TrimSpace(filter.ReminderID)
+	if reminderID == "" {
+		return true
+	}
+
+	if reminderID == "late" {
+		if !strings.HasPrefix(stateKey, "late:"+deliveryID+":") {
+			return false
+		}
+	} else {
+		if !strings.HasPrefix(stateKey, "reminder:"+deliveryID+":") {
+			return false
+		}
+		if !strings.HasSuffix(stateKey, ":id:"+reminderID) {
+			return false
+		}
+	}
+
+	dueDate := strings.TrimSpace(filter.DueDate)
+	if dueDate == "" {
+		return true
+	}
+
+	return strings.TrimSpace(record.DueDate) == dueDate
 }

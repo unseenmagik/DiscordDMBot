@@ -20,6 +20,7 @@ const (
 	commandScheduleAdd    = "schedule-add"
 	commandScheduleEdit   = "schedule-edit"
 	commandScheduleRemove = "schedule-remove"
+	commandStateClear     = "state-clear"
 	commandScheduleView   = "schedule-view"
 	maxScheduleEmbeds     = 10
 	maxFieldsPerEmbed     = 5
@@ -105,6 +106,8 @@ func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *d
 			err = s.handleScheduleEdit(interaction)
 		case commandScheduleRemove:
 			err = s.handleScheduleRemove(interaction)
+		case commandStateClear:
+			err = s.handleStateClear(interaction)
 		case commandScheduleView:
 			err = s.handleScheduleView(interaction)
 		default:
@@ -484,6 +487,83 @@ func (s *Service) handleScheduleRemove(interaction *discordgo.InteractionCreate)
 			Value:  frequencyLabel(removedDelivery.Frequency),
 			Inline: true,
 		})
+	}
+
+	return s.respondEmbeds(interaction.Interaction, "", []*discordgo.MessageEmbed{confirmation})
+}
+
+func (s *Service) handleStateClear(interaction *discordgo.InteractionCreate) error {
+	options := optionsByName(interaction.ApplicationCommandData().Options)
+
+	deliveryID := requiredString(options, "id")
+	if deliveryID == "" {
+		return userFacingError{message: "A delivery id is required."}
+	}
+
+	reminderID := optionalString(options, "reminder_id")
+	dueDate := optionalString(options, "due_date")
+
+	if dueDate != "" && reminderID == "" {
+		return userFacingError{message: "due_date can only be used when reminder_id is also provided."}
+	}
+
+	cfg, err := s.configStore.Load()
+	if err != nil {
+		return err
+	}
+
+	deliveryConfig, found := findDeliveryByID(cfg.Deliveries, deliveryID)
+	if !found {
+		return userFacingError{message: fmt.Sprintf("Delivery %q was not found in the config.", deliveryID)}
+	}
+
+	if reminderID != "" {
+		if _, exists := deliveryConfig.ReminderByID(reminderID); !exists {
+			return userFacingError{message: fmt.Sprintf("Reminder %q was not found under delivery %q.", reminderID, deliveryID)}
+		}
+	}
+
+	if dueDate != "" {
+		location, err := time.LoadLocation(cfg.Runtime.Timezone)
+		if err != nil {
+			return err
+		}
+		if _, err := time.ParseInLocation("2006-01-02", dueDate, location); err != nil {
+			return userFacingError{message: "due_date must use YYYY-MM-DD format."}
+		}
+	}
+
+	clearedStateEntries, err := s.stateStore.ClearMatching(state.ClearFilter{
+		DeliveryID: deliveryID,
+		ReminderID: reminderID,
+		DueDate:    dueDate,
+	})
+	if err != nil {
+		return err
+	}
+
+	color, err := config.ParseHexColor(cfg.Embed.ConfigChangeColor)
+	if err != nil {
+		return err
+	}
+
+	scope := "Entire delivery state"
+	if reminderID != "" && dueDate != "" {
+		scope = fmt.Sprintf("Reminder `%s` for due date `%s`", reminderID, dueDate)
+	} else if reminderID != "" {
+		scope = fmt.Sprintf("Reminder `%s` across saved occurrences", reminderID)
+	}
+
+	confirmation := &discordgo.MessageEmbed{
+		Title:       "State Cleared",
+		Description: "Saved delivery state was cleared. Matching reminders can now send again if the scheduler sees them as due.",
+		Color:       color,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "ID", Value: deliveryID, Inline: true},
+			{Name: "Scope", Value: scope, Inline: false},
+			{Name: "Entries Cleared", Value: fmt.Sprintf("%d", clearedStateEntries), Inline: true},
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 
 	return s.respondEmbeds(interaction.Interaction, "", []*discordgo.MessageEmbed{confirmation})
@@ -877,6 +957,37 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 					Name:        "id",
 					Description: "Existing delivery id to remove.",
 					Required:    true,
+				},
+			},
+		},
+		{
+			Name:         commandStateClear,
+			Description:  "Clear saved delivery state so a schedule or reminder can be sent again.",
+			DMPermission: &dmPermission,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "id",
+					Description: "Existing delivery id to clear saved state for.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reminder_id",
+					Description: "Optional reminder id to clear, such as initial, final, due, or late.",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "initial", Value: "initial"},
+						{Name: "final", Value: "final"},
+						{Name: "due", Value: "due"},
+						{Name: "late", Value: "late"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_date",
+					Description: "Optional due date in YYYY-MM-DD format when clearing one recurring occurrence.",
+					Required:    false,
 				},
 			},
 		},
