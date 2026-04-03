@@ -306,6 +306,7 @@ The bot registers these slash commands in the configured guilds:
 - `/send-now user value [due_date] [due_time] [message]`
 - `/schedule-add user due_date value initial_time initial_message final_time final_message [frequency] [due_time] [initial_days_before] [final_days_before] [id]`
 - `/schedule-edit id [user] [due_date] [value] [frequency] [due_time] [initial_title] [initial_time] [initial_message] [initial_days_before] [final_title] [final_time] [final_message] [final_days_before] [due_title] [due_time_reminder] [due_message] [due_days_before] [late_title] [late_message]`
+- `/schedule-remove id`
 - `/schedule-view`
 
 `/send-now` can optionally include a due date and due time so the DM embed shows the payment due value instead of the current send timestamp.
@@ -332,6 +333,8 @@ Formats:
 - the `final` reminder
 - the `due` reminder
 - the `late` reminder
+
+`/schedule-remove` removes the whole top-level `[[deliveries]]` block for the given `id`, including all nested reminders under it. It also clears matching entries from `data/delivery-state.json` so recreating the same delivery ID later starts fresh.
 
 ## Security Notes
 

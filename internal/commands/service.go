@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	commandSendNow      = "send-now"
-	commandScheduleAdd  = "schedule-add"
-	commandScheduleEdit = "schedule-edit"
-	commandScheduleView = "schedule-view"
-	maxScheduleEmbeds   = 10
-	maxFieldsPerEmbed   = 5
+	commandSendNow        = "send-now"
+	commandScheduleAdd    = "schedule-add"
+	commandScheduleEdit   = "schedule-edit"
+	commandScheduleRemove = "schedule-remove"
+	commandScheduleView   = "schedule-view"
+	maxScheduleEmbeds     = 10
+	maxFieldsPerEmbed     = 5
 )
 
 type Service struct {
@@ -102,6 +103,8 @@ func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *d
 			err = s.handleScheduleAdd(interaction)
 		case commandScheduleEdit:
 			err = s.handleScheduleEdit(interaction)
+		case commandScheduleRemove:
+			err = s.handleScheduleRemove(interaction)
 		case commandScheduleView:
 			err = s.handleScheduleView(interaction)
 		default:
@@ -432,6 +435,54 @@ func (s *Service) handleScheduleEdit(interaction *discordgo.InteractionCreate) e
 				scheduledDelivery.DaysBeforeDue,
 			),
 			Inline: false,
+		})
+	}
+
+	return s.respondEmbeds(interaction.Interaction, "", []*discordgo.MessageEmbed{confirmation})
+}
+
+func (s *Service) handleScheduleRemove(interaction *discordgo.InteractionCreate) error {
+	options := optionsByName(interaction.ApplicationCommandData().Options)
+
+	deliveryID := requiredString(options, "id")
+	if deliveryID == "" {
+		return userFacingError{message: "A delivery id is required."}
+	}
+
+	cfg, removedDelivery, err := s.configStore.RemoveDelivery(deliveryID)
+	if err != nil {
+		return userFacingError{message: err.Error()}
+	}
+
+	clearedStateEntries, err := s.stateStore.ClearForDeliveryID(deliveryID)
+	if err != nil {
+		return err
+	}
+
+	color, err := config.ParseHexColor(cfg.Embed.Color)
+	if err != nil {
+		return err
+	}
+
+	confirmation := &discordgo.MessageEmbed{
+		Title:       "Schedule Removed",
+		Description: "The payment reminder schedule was removed from the config file. The scheduler will stop using it on the next poll.",
+		Color:       color,
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "ID", Value: deliveryID, Inline: true},
+			{Name: "User", Value: fmt.Sprintf("<@%s>", removedDelivery.UserID), Inline: true},
+			{Name: "Value", Value: removedDelivery.Value, Inline: true},
+			{Name: "Payment Due", Value: valueOrFallback(dueLine(*removedDelivery), "Not set"), Inline: false},
+			{Name: "State Entries Cleared", Value: fmt.Sprintf("%d", clearedStateEntries), Inline: true},
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if removedDelivery.Frequency != "" {
+		confirmation.Fields = append(confirmation.Fields, &discordgo.MessageEmbedField{
+			Name:   "Frequency",
+			Value:  frequencyLabel(removedDelivery.Frequency),
+			Inline: true,
 		})
 	}
 
@@ -813,6 +864,19 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 					Name:        "late_message",
 					Description: "Optional replacement message for the late reminder.",
 					Required:    false,
+				},
+			},
+		},
+		{
+			Name:         commandScheduleRemove,
+			Description:  "Remove a payment schedule by id and clear its saved delivery state.",
+			DMPermission: &dmPermission,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "id",
+					Description: "Existing delivery id to remove.",
+					Required:    true,
 				},
 			},
 		},
