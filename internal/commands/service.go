@@ -46,6 +46,18 @@ func (e userFacingError) Error() string {
 	return e.message
 }
 
+type deferredInteractionError struct {
+	err error
+}
+
+func (e deferredInteractionError) Error() string {
+	return e.err.Error()
+}
+
+func (e deferredInteractionError) Unwrap() error {
+	return e.err
+}
+
 func NewService(session *discordgo.Session, configStore *config.Store, stateStore *state.Store, logger *log.Logger, discordConfig config.Discord) *Service {
 	allowedRoleIDs := make(map[string]struct{}, len(discordConfig.AllowedRoleIDs))
 	for _, roleID := range discordConfig.AllowedRoleIDs {
@@ -136,7 +148,14 @@ func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *d
 		if errors.As(err, &userErr) {
 			responseMessage = userErr.message
 		}
-		if responseErr := s.respondError(interaction.Interaction, responseMessage); responseErr != nil {
+		var deferredErr deferredInteractionError
+		var responseErr error
+		if errors.As(err, &deferredErr) {
+			responseErr = s.editDeferredText(interaction.Interaction, responseMessage)
+		} else {
+			responseErr = s.respondError(interaction.Interaction, responseMessage)
+		}
+		if responseErr != nil {
 			s.logger.Printf("failed to send interaction error response: %v", responseErr)
 		}
 	}
@@ -689,10 +708,20 @@ func (s *Service) handleComponent(interaction *discordgo.InteractionCreate) erro
 		return userFacingError{message: "Unknown button action."}
 	}
 
-	return s.handleLateReminder(interaction, deliveryID, dueDate)
+	if err := s.deferEphemeralResponse(interaction.Interaction); err != nil {
+		return err
+	}
+
+	if err := s.handleLateReminder(interaction, deliveryID, dueDate); err != nil {
+		return deferredInteractionError{err: err}
+	}
+
+	return nil
 }
 
 func (s *Service) handleLateReminder(interaction *discordgo.InteractionCreate, deliveryID, dueDate string) error {
+	s.logger.Printf("late reminder requested: delivery=%s due=%s channel=%s message=%s", deliveryID, dueDate, interaction.ChannelID, interaction.Message.ID)
+
 	cfg, err := s.configStore.Load()
 	if err != nil {
 		return err
@@ -796,7 +825,8 @@ func (s *Service) handleLateReminder(interaction *discordgo.InteractionCreate, d
 		s.logger.Printf("send admin late reminder status failed: %v", err)
 	}
 
-	return s.respondText(interaction.Interaction, fmt.Sprintf("Late reminder sent to <@%s>.", lateDelivery.UserID))
+	s.logger.Printf("late reminder sent: delivery=%s due=%s user=%s", deliveryID, dueDate, lateDelivery.UserID)
+	return s.editDeferredText(interaction.Interaction, fmt.Sprintf("Late reminder sent to <@%s>.", lateDelivery.UserID))
 }
 
 func applicationCommands() []*discordgo.ApplicationCommand {
@@ -1471,6 +1501,22 @@ func (s *Service) respondText(interaction *discordgo.Interaction, content string
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})
+}
+
+func (s *Service) deferEphemeralResponse(interaction *discordgo.Interaction) error {
+	return s.session.InteractionRespond(interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags: discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+func (s *Service) editDeferredText(interaction *discordgo.Interaction, content string) error {
+	_, err := s.session.InteractionResponseEdit(interaction, &discordgo.WebhookEdit{
+		Content: &content,
+	})
+	return err
 }
 
 func boolLabel(value bool) string {
