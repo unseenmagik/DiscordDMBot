@@ -314,12 +314,21 @@ func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) er
 }
 
 func (s *Service) handleScheduleView(interaction *discordgo.InteractionCreate) error {
+	options := optionsByName(interaction.ApplicationCommandData().Options)
+
 	cfg, err := s.configStore.Load()
 	if err != nil {
 		return err
 	}
 
-	embeds, err := buildScheduleEmbeds(cfg)
+	filterID := optionalString(options, "id")
+	if filterID != "" {
+		if _, found := findDeliveryByID(cfg.Deliveries, filterID); !found {
+			return userFacingError{message: fmt.Sprintf("Delivery %q was not found in the config.", filterID)}
+		}
+	}
+
+	embeds, err := buildScheduleEmbeds(cfg, filterID)
 	if err != nil {
 		return err
 	}
@@ -995,11 +1004,19 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 			Name:         commandScheduleView,
 			Description:  "Read the current config as parsed embed pages.",
 			DMPermission: &dmPermission,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "id",
+					Description: "Optional delivery id to inspect on its own.",
+					Required:    false,
+				},
+			},
 		},
 	}
 }
 
-func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) {
+func buildScheduleEmbeds(cfg *config.Config, filterID string) ([]*discordgo.MessageEmbed, error) {
 	location, err := time.LoadLocation(cfg.Runtime.Timezone)
 	if err != nil {
 		return nil, err
@@ -1010,26 +1027,40 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 		return nil, err
 	}
 
-	expandedDeliveries := make([]config.ScheduledDelivery, 0)
+	visibleGroups := make([]config.Delivery, 0, len(cfg.Deliveries))
+	scheduledSendCount := 0
+	configuredReminderCount := 0
 	for _, deliveryConfig := range cfg.Deliveries {
+		if filterID != "" && strings.TrimSpace(deliveryConfig.ID) != strings.TrimSpace(filterID) {
+			continue
+		}
+
 		scheduledDeliveries, err := deliveryConfig.ExpandAt(location, time.Now().In(location))
 		if err != nil {
 			return nil, err
 		}
-		expandedDeliveries = append(expandedDeliveries, scheduledDeliveries...)
+		visibleGroups = append(visibleGroups, deliveryConfig)
+		scheduledSendCount += len(scheduledDeliveries)
+		configuredReminderCount += len(deliveryConfig.Reminders)
+	}
+
+	title := "Configured Schedule"
+	if filterID != "" {
+		title = fmt.Sprintf("Configured Schedule: %s", filterID)
 	}
 
 	embeds := []*discordgo.MessageEmbed{
 		{
-			Title: "Configured Schedule",
+			Title: title,
 			Description: fmt.Sprintf(
-				"Timezone: `%s`\nPoll Interval: `%d seconds`\nGuild Scope: `%s`\nState Path: `%s`\nDelivery Groups: `%d`\nScheduled Sends: `%d`",
+				"Timezone: `%s`\nPoll Interval: `%d seconds`\nGuild Scope: `%s`\nState Path: `%s`\nDelivery Groups: `%d`\nConfigured Reminders: `%d`\nExpanded Sends This Cycle: `%d`",
 				cfg.Runtime.Timezone,
 				cfg.Runtime.PollIntervalSeconds,
 				strings.Join(cfg.Discord.GuildIDs, ", "),
 				cfg.Runtime.StatePath,
-				len(cfg.Deliveries),
-				len(expandedDeliveries),
+				len(visibleGroups),
+				configuredReminderCount,
+				scheduledSendCount,
 			),
 			Color: color,
 			Fields: []*discordgo.MessageEmbedField{
@@ -1053,65 +1084,76 @@ func buildScheduleEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) 
 		},
 	}
 
-	if len(cfg.Deliveries) == 0 {
+	if len(visibleGroups) == 0 {
 		embeds[0].Fields = append(embeds[0].Fields, &discordgo.MessageEmbedField{
 			Name:   "Deliveries",
-			Value:  "No scheduled deliveries are currently configured.",
+			Value:  "No matching deliveries are currently configured.",
 			Inline: false,
 		})
 		return embeds, nil
 	}
 
 	maxVisibleDeliveries := (maxScheduleEmbeds - 1) * maxFieldsPerEmbed
-	visibleDeliveries := expandedDeliveries
+	displayGroups := visibleGroups
 	truncated := false
-	if len(visibleDeliveries) > maxVisibleDeliveries {
-		visibleDeliveries = visibleDeliveries[:maxVisibleDeliveries]
+	if len(displayGroups) > maxVisibleDeliveries {
+		displayGroups = displayGroups[:maxVisibleDeliveries]
 		truncated = true
 	}
 
-	totalPages := (len(visibleDeliveries) + maxFieldsPerEmbed - 1) / maxFieldsPerEmbed
+	totalPages := (len(displayGroups) + maxFieldsPerEmbed - 1) / maxFieldsPerEmbed
 	for page := 0; page < totalPages; page++ {
 		start := page * maxFieldsPerEmbed
 		end := start + maxFieldsPerEmbed
-		if end > len(visibleDeliveries) {
-			end = len(visibleDeliveries)
+		if end > len(displayGroups) {
+			end = len(displayGroups)
 		}
 
 		pageEmbed := &discordgo.MessageEmbed{
-			Title:     fmt.Sprintf("Scheduled Deliveries %d/%d", page+1, totalPages),
+			Title:     fmt.Sprintf("Configured Deliveries %d/%d", page+1, totalPages),
 			Color:     color,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 
-		for index, deliveryConfig := range visibleDeliveries[start:end] {
-			label := deliveryConfig.DeliveryID
+		for index, deliveryConfig := range displayGroups[start:end] {
+			label := strings.TrimSpace(deliveryConfig.ID)
 			if label == "" {
-				label = deliveryConfig.StateKey
-			}
-			if deliveryConfig.ReminderName != "" {
-				label += " / " + deliveryConfig.ReminderName
+				if deliveryConfig.DueDate != "" {
+					label = fmt.Sprintf("user:%s due:%s", deliveryConfig.UserID, deliveryConfig.DueDate)
+				} else {
+					label = fmt.Sprintf("user:%s at:%s %s", deliveryConfig.UserID, deliveryConfig.Date, deliveryConfig.Time)
+				}
 			}
 
 			fieldLines := []string{
 				fmt.Sprintf("User: <@%s>", deliveryConfig.UserID),
-				fmt.Sprintf("When: %s", deliveryConfig.ScheduledAt.Format("2006-01-02 15:04 MST")),
 				fmt.Sprintf("Value: `%s`", deliveryConfig.Value),
-				fmt.Sprintf("Frequency: %s", frequencyLabel(deliveryConfig.Frequency)),
-				fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
 			}
-			if deliveryConfig.ReminderName != "" {
+
+			if deliveryConfig.DueDate != "" {
 				fieldLines = append(fieldLines,
-					fmt.Sprintf("Reminder: %s", deliveryConfig.ReminderName),
-					fmt.Sprintf("Days Before Due: %d", deliveryConfig.DaysBeforeDue),
+					fmt.Sprintf("Payment Due: %s", dueLine(deliveryConfig)),
+					fmt.Sprintf("Frequency: %s", frequencyLabel(deliveryConfig.Frequency)),
+				)
+			} else {
+				fieldLines = append(fieldLines,
+					fmt.Sprintf("When: %s %s", deliveryConfig.Date, deliveryConfig.Time),
+					fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
 				)
 			}
-			if deliveryConfig.DueDate != "" {
-				dueLine := deliveryConfig.DueDate
-				if deliveryConfig.DueTime != "" {
-					dueLine += " " + deliveryConfig.DueTime
+
+			if len(deliveryConfig.Reminders) > 0 {
+				reminderLines := make([]string, 0, len(deliveryConfig.Reminders))
+				for _, reminder := range deliveryConfig.Reminders {
+					line := valueOrFallback(reminder.ID, reminder.Name)
+					if reminder.ManualOnly() {
+						line += " (manual)"
+					} else {
+						line += fmt.Sprintf(" - %d days before at %s", reminder.DaysBeforeDue, reminder.Time)
+					}
+					reminderLines = append(reminderLines, line)
 				}
-				fieldLines = append(fieldLines, fmt.Sprintf("Payment Due: %s", dueLine))
+				fieldLines = append(fieldLines, "Reminders: "+strings.Join(reminderLines, "\n"))
 			}
 
 			fieldValue := strings.Join(fieldLines, "\n")

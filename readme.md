@@ -323,7 +323,7 @@ The bot registers these slash commands in the configured guilds:
 - `/schedule-edit id [user] [due_date] [value] [frequency] [due_time] [initial_title] [initial_time] [initial_message] [initial_days_before] [final_title] [final_time] [final_message] [final_days_before] [due_title] [due_time_reminder] [due_message] [due_days_before] [late_title] [late_message]`
 - `/schedule-remove id`
 - `/state-clear id [reminder_id] [due_date]`
-- `/schedule-view`
+- `/schedule-view [id]`
 
 `/send-now` can optionally include a due date and due time so the DM embed shows the payment due value instead of the current send timestamp.
 
@@ -359,6 +359,8 @@ Examples:
 - `/state-clear id:payment-001`
 - `/state-clear id:payment-001 reminder_id:final`
 - `/state-clear id:payment-001 reminder_id:due due_date:2026-04-15`
+
+`/schedule-view` now lists all configured top-level delivery groups from the config file by default. You can also pass an `id` to inspect one delivery on its own.
 
 ## Security Notes
 
