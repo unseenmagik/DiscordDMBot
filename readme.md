@@ -7,7 +7,7 @@ A Go-based Discord bot for sending scheduled DM embeds to specific users, with s
 - Sends scheduled Discord DMs as embeds
 - Stores schedules in `config/config.toml`
 - Writes runtime logs to `logs/` with daily rotation
-- Can send sent/skipped/failed scheduler notifications to a Discord webhook
+- Can post bot-owned admin status messages to a configured Discord admin channel
 - Restricts bot usage to configured guilds and roles
 - Exposes admin slash commands for managing sends
 - Runs cleanly as a single compiled binary under PM2
@@ -55,6 +55,7 @@ title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#2B6CB0"
+config_change_color = "#FFFFFF"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
 due_color = "#2B6CB0"
@@ -109,7 +110,7 @@ Set these first:
 - `discord.allowed_role_ids`
   The role IDs allowed to use the slash commands
 - `discord.admin_channel_id`
-  Bot-owned admin channel for monitoring posts and late reminder buttons
+  Bot-owned admin channel for monitoring posts, config reload confirmations, and late reminder buttons
 - `runtime.timezone`
   Timezone used for scheduled sends
 - `runtime.poll_interval_seconds`
@@ -208,6 +209,7 @@ Reminder embeds also get automatic color coding from config:
 - reminder `id = "due"` uses `embed.due_color`
 - reminder `id = "late"` uses `embed.late_color`
 - top-level one-off `[[deliveries]]` entries use `embed.one_off_color`
+- the `Config Changes Applied` admin embed uses `embed.config_change_color`
 - anything else falls back to `embed.color`
 
 ## Build
@@ -345,6 +347,7 @@ Formats:
 - If a reminder was already delivered once, the scheduler will not send it again while the same state key still exists
 - During testing, reusing the same delivery ID, due date, and reminder ID can make the bot treat a reminder as already sent
 - The bot can also post admin status messages in `discord.admin_channel_id`
+- When the running scheduler detects that `config/config.toml` changed on disk, it posts a `Config Changes Applied` message to the admin channel after that poll cycle has completed
 - When a `late` reminder exists and the `due` reminder is sent, the admin message includes a `Late reminder` button
 - Pressing that button sends the configured `late` reminder once and then disables the button
 

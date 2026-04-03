@@ -42,6 +42,7 @@ type Embed struct {
 	DescriptionTemplate string `toml:"description_template"`
 	Footer              string `toml:"footer"`
 	Color               string `toml:"color"`
+	ConfigChangeColor   string `toml:"config_change_color"`
 	InitialColor        string `toml:"initial_color"`
 	FinalColor          string `toml:"final_color"`
 	DueColor            string `toml:"due_color"`
@@ -134,6 +135,7 @@ func (c *Config) Validate() error {
 	c.Embed.DescriptionTemplate = strings.TrimSpace(c.Embed.DescriptionTemplate)
 	c.Embed.Footer = strings.TrimSpace(c.Embed.Footer)
 	c.Embed.Color = strings.TrimSpace(c.Embed.Color)
+	c.Embed.ConfigChangeColor = strings.TrimSpace(c.Embed.ConfigChangeColor)
 	c.Embed.InitialColor = strings.TrimSpace(c.Embed.InitialColor)
 	c.Embed.FinalColor = strings.TrimSpace(c.Embed.FinalColor)
 	c.Embed.DueColor = strings.TrimSpace(c.Embed.DueColor)
@@ -204,6 +206,9 @@ func (c *Config) Validate() error {
 	if c.Embed.Color == "" {
 		c.Embed.Color = "#2B6CB0"
 	}
+	if c.Embed.ConfigChangeColor == "" {
+		c.Embed.ConfigChangeColor = "#FFFFFF"
+	}
 	if c.Embed.InitialColor == "" {
 		c.Embed.InitialColor = "#2F855A"
 	}
@@ -222,6 +227,9 @@ func (c *Config) Validate() error {
 
 	if _, err := ParseHexColor(c.Embed.Color); err != nil {
 		return fmt.Errorf("invalid embed.color: %w", err)
+	}
+	if _, err := ParseHexColor(c.Embed.ConfigChangeColor); err != nil {
+		return fmt.Errorf("invalid embed.config_change_color: %w", err)
 	}
 	if _, err := ParseHexColor(c.Embed.InitialColor); err != nil {
 		return fmt.Errorf("invalid embed.initial_color: %w", err)

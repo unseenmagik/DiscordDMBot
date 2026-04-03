@@ -8,7 +8,7 @@ guild_ids = ["123456789012345678"]
 # Only members with one of these role IDs can use the slash commands.
 allowed_role_ids = ["345678901234567890"]
 
-# Bot-owned admin channel for status posts and late reminder buttons.
+# Bot-owned admin channel for status posts, applied-config notices, and late reminder buttons.
 admin_channel_id = "456789012345678901"
 
 [runtime]
@@ -33,6 +33,7 @@ title = "Scheduled Reminder"
 description_template = "Hello {{user}},\n\nThis is your payment reminder.\n\nValue: **{{value}}**\nDue: **{{due}}**"
 footer = "Sent automatically by the Discord DM Bot"
 color = "#C53030"
+config_change_color = "#FFFFFF"
 initial_color = "#2F855A"
 final_color = "#DD6B20"
 due_color = "#C53030"

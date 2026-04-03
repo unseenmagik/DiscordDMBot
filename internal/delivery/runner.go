@@ -2,8 +2,11 @@ package delivery
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +23,12 @@ type Runner struct {
 	store       *state.Store
 	logger      *log.Logger
 	notifyState map[string]string
+	lastConfig  *configSnapshot
+}
+
+type configSnapshot struct {
+	hash string
+	cfg  *config.Config
 }
 
 func NewRunner(session *discordgo.Session, configStore *config.Store, store *state.Store, logger *log.Logger) *Runner {
@@ -47,6 +56,8 @@ func (r *Runner) Run(ctx context.Context) error {
 			delay = time.Duration(cfg.Runtime.PollIntervalSeconds) * time.Second
 			if err := r.processDueDeliveries(cfg, fileState); err != nil {
 				r.logger.Printf("delivery pass failed: %v", err)
+			} else {
+				r.notifyConfigApplied(cfg)
 			}
 		}
 
@@ -128,6 +139,46 @@ func (r *Runner) processDueDeliveries(cfg *config.Config, fileState *state.FileS
 	}
 
 	return nil
+}
+
+func (r *Runner) notifyConfigApplied(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+
+	hash := configFingerprint(cfg)
+	if r.lastConfig == nil {
+		r.lastConfig = &configSnapshot{hash: hash, cfg: cloneConfig(cfg)}
+		return
+	}
+
+	if r.lastConfig.hash == hash {
+		return
+	}
+
+	previous := r.lastConfig.cfg
+	r.lastConfig = &configSnapshot{hash: hash, cfg: cloneConfig(cfg)}
+
+	if cfg.Discord.AdminChannelID == "" {
+		return
+	}
+
+	summary := buildConfigChangeSummary(previous, cfg)
+	color, err := config.ParseHexColor(cfg.Embed.ConfigChangeColor)
+	if err != nil {
+		r.logger.Printf("config applied color parse failed: %v", err)
+		return
+	}
+
+	embed := admin.StatusEmbed(
+		"Config Changes Applied",
+		summary,
+		color,
+	)
+
+	if err := admin.SendMessage(r.session, cfg.Discord.AdminChannelID, "", embed, nil); err != nil {
+		r.logger.Printf("admin notify config applied failed: %v", err)
+	}
 }
 
 func (r *Runner) sendDM(cfg *config.Config, deliveryConfig config.ScheduledDelivery, message string, scheduledAt time.Time) error {
@@ -254,4 +305,190 @@ func shouldOfferLateReminder(deliveryGroup config.Delivery, deliveryConfig confi
 	}
 	_, exists := deliveryGroup.ReminderByID("late")
 	return exists
+}
+
+func configFingerprint(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+
+	h := sha256.New()
+	writeFingerprint := func(parts ...string) {
+		for _, part := range parts {
+			_, _ = h.Write([]byte(part))
+			_, _ = h.Write([]byte{0})
+		}
+	}
+
+	writeFingerprint(
+		cfg.Discord.AdminChannelID,
+		strings.Join(cfg.Discord.GuildIDs, ","),
+		strings.Join(cfg.Discord.AllowedRoleIDs, ","),
+		cfg.Runtime.Timezone,
+		fmt.Sprintf("%d", cfg.Runtime.PollIntervalSeconds),
+		fmt.Sprintf("%t", cfg.Runtime.SendMissedDeliveries),
+		cfg.Runtime.StatePath,
+		cfg.Embed.Title,
+		cfg.Embed.DescriptionTemplate,
+		cfg.Embed.Footer,
+		cfg.Embed.Color,
+		cfg.Embed.ConfigChangeColor,
+		cfg.Embed.InitialColor,
+		cfg.Embed.FinalColor,
+		cfg.Embed.DueColor,
+		cfg.Embed.LateColor,
+		cfg.Embed.OneOffColor,
+	)
+
+	for _, deliveryCfg := range cfg.Deliveries {
+		writeFingerprint(deliveryDigest(deliveryCfg))
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func deliveryDigest(deliveryCfg config.Delivery) string {
+	parts := []string{
+		deliveryCfg.ID,
+		deliveryCfg.UserID,
+		deliveryCfg.Date,
+		deliveryCfg.Time,
+		deliveryCfg.Message,
+		deliveryCfg.Value,
+		deliveryCfg.DueDate,
+		deliveryCfg.DueTime,
+		deliveryCfg.Frequency,
+	}
+
+	for _, reminder := range deliveryCfg.Reminders {
+		parts = append(parts,
+			reminder.ID,
+			reminder.Name,
+			reminder.Title,
+			fmt.Sprintf("%d", reminder.DaysBeforeDue),
+			reminder.Time,
+			reminder.Message,
+		)
+	}
+
+	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
+	return hex.EncodeToString(sum[:])
+}
+
+func buildConfigChangeSummary(previous, current *config.Config) string {
+	if previous == nil || current == nil {
+		return "The running bot reloaded the config file."
+	}
+
+	lines := []string{"The running bot detected and applied config changes from disk."}
+
+	if previous.Runtime.Timezone != current.Runtime.Timezone ||
+		previous.Runtime.PollIntervalSeconds != current.Runtime.PollIntervalSeconds ||
+		previous.Runtime.SendMissedDeliveries != current.Runtime.SendMissedDeliveries ||
+		previous.Runtime.StatePath != current.Runtime.StatePath {
+		lines = append(lines, "- Runtime settings updated")
+	}
+
+	if previous.Embed != current.Embed {
+		lines = append(lines, "- Embed settings updated")
+	}
+
+	if previous.Discord.AdminChannelID != current.Discord.AdminChannelID ||
+		!equalStringSlices(previous.Discord.GuildIDs, current.Discord.GuildIDs) ||
+		!equalStringSlices(previous.Discord.AllowedRoleIDs, current.Discord.AllowedRoleIDs) {
+		lines = append(lines, "- Discord scope or admin channel settings updated")
+	}
+
+	added, removed, updated := diffDeliveries(previous.Deliveries, current.Deliveries)
+	if len(added) > 0 {
+		lines = append(lines, fmt.Sprintf("- Added deliveries: %s", strings.Join(added, ", ")))
+	}
+	if len(updated) > 0 {
+		lines = append(lines, fmt.Sprintf("- Updated deliveries: %s", strings.Join(updated, ", ")))
+	}
+	if len(removed) > 0 {
+		lines = append(lines, fmt.Sprintf("- Removed deliveries: %s", strings.Join(removed, ", ")))
+	}
+	if len(lines) == 1 {
+		lines = append(lines, "- No high-level summary was generated, but the config fingerprint changed")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func diffDeliveries(previous, current []config.Delivery) ([]string, []string, []string) {
+	previousMap := make(map[string]config.Delivery, len(previous))
+	currentMap := make(map[string]config.Delivery, len(current))
+
+	for index, deliveryCfg := range previous {
+		previousMap[deliveryLabel(deliveryCfg, index)] = deliveryCfg
+	}
+	for index, deliveryCfg := range current {
+		currentMap[deliveryLabel(deliveryCfg, index)] = deliveryCfg
+	}
+
+	var added []string
+	var removed []string
+	var updated []string
+
+	for label, currentDelivery := range currentMap {
+		previousDelivery, exists := previousMap[label]
+		if !exists {
+			added = append(added, label)
+			continue
+		}
+		if deliveryDigest(previousDelivery) != deliveryDigest(currentDelivery) {
+			updated = append(updated, label)
+		}
+	}
+
+	for label := range previousMap {
+		if _, exists := currentMap[label]; !exists {
+			removed = append(removed, label)
+		}
+	}
+
+	sort.Strings(added)
+	sort.Strings(removed)
+	sort.Strings(updated)
+	return added, removed, updated
+}
+
+func deliveryLabel(deliveryCfg config.Delivery, index int) string {
+	if strings.TrimSpace(deliveryCfg.ID) != "" {
+		return deliveryCfg.ID
+	}
+	if strings.TrimSpace(deliveryCfg.DueDate) != "" {
+		return fmt.Sprintf("user:%s due:%s #%d", deliveryCfg.UserID, deliveryCfg.DueDate, index+1)
+	}
+	return fmt.Sprintf("user:%s at:%s %s #%d", deliveryCfg.UserID, deliveryCfg.Date, deliveryCfg.Time, index+1)
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneConfig(cfg *config.Config) *config.Config {
+	if cfg == nil {
+		return nil
+	}
+
+	cloned := *cfg
+	cloned.Discord.GuildIDs = append([]string(nil), cfg.Discord.GuildIDs...)
+	cloned.Discord.AllowedRoleIDs = append([]string(nil), cfg.Discord.AllowedRoleIDs...)
+	cloned.Deliveries = make([]config.Delivery, len(cfg.Deliveries))
+	for index, deliveryCfg := range cfg.Deliveries {
+		cloned.Deliveries[index] = deliveryCfg
+		cloned.Deliveries[index].Reminders = append([]config.Reminder(nil), deliveryCfg.Reminders...)
+	}
+
+	return &cloned
 }
