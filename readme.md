@@ -319,13 +319,17 @@ pm2 restart discord-dm-bot
 The bot registers these slash commands in the configured guilds:
 
 - `/send-now user value [due_date] [due_time] [message]`
+- `/reminder-resend id reminder_id [due_date]`
 - `/schedule-add user due_date value initial_time initial_message final_time final_message [frequency] [due_time] [initial_days_before] [final_days_before] [id]`
 - `/schedule-edit id [user] [due_date] [value] [frequency] [due_time] [initial_title] [initial_time] [initial_message] [initial_days_before] [final_title] [final_time] [final_message] [final_days_before] [due_title] [due_time_reminder] [due_message] [due_days_before] [late_title] [late_message]`
+- `/schedule-list-ids`
 - `/schedule-remove id`
 - `/state-clear id [reminder_id] [due_date]`
 - `/schedule-view [id]`
 
 `/send-now` can optionally include a due date and due time so the DM embed shows the payment due value instead of the current send timestamp.
+
+`/reminder-resend` sends one configured reminder immediately without changing `config/config.toml` or `data/delivery-state.json`. For recurring delivery groups, `due_date` is required so the bot knows which occurrence to render.
 
 `/schedule-add` creates a payment schedule with two reminders:
 
@@ -361,6 +365,8 @@ Examples:
 - `/state-clear id:payment-001 reminder_id:due due_date:2026-04-15`
 
 `/schedule-view` now lists all configured top-level delivery groups from the config file by default. You can also pass an `id` to inspect one delivery on its own.
+
+`/schedule-list-ids` gives you a compact admin list of configured delivery IDs and their basic details so you can quickly choose the right `id` for edit, remove, resend, or state-clear actions.
 
 ## Security Notes
 

@@ -16,14 +16,16 @@ import (
 )
 
 const (
-	commandSendNow        = "send-now"
-	commandScheduleAdd    = "schedule-add"
-	commandScheduleEdit   = "schedule-edit"
-	commandScheduleRemove = "schedule-remove"
-	commandStateClear     = "state-clear"
-	commandScheduleView   = "schedule-view"
-	maxScheduleEmbeds     = 10
-	maxFieldsPerEmbed     = 5
+	commandSendNow         = "send-now"
+	commandReminderResend  = "reminder-resend"
+	commandScheduleAdd     = "schedule-add"
+	commandScheduleEdit    = "schedule-edit"
+	commandScheduleListIDs = "schedule-list-ids"
+	commandScheduleRemove  = "schedule-remove"
+	commandStateClear      = "state-clear"
+	commandScheduleView    = "schedule-view"
+	maxScheduleEmbeds      = 10
+	maxFieldsPerEmbed      = 5
 )
 
 type Service struct {
@@ -100,10 +102,14 @@ func (s *Service) onInteractionCreate(session *discordgo.Session, interaction *d
 		switch interaction.ApplicationCommandData().Name {
 		case commandSendNow:
 			err = s.handleSendNow(interaction)
+		case commandReminderResend:
+			err = s.handleReminderResend(interaction)
 		case commandScheduleAdd:
 			err = s.handleScheduleAdd(interaction)
 		case commandScheduleEdit:
 			err = s.handleScheduleEdit(interaction)
+		case commandScheduleListIDs:
+			err = s.handleScheduleListIDs(interaction)
 		case commandScheduleRemove:
 			err = s.handleScheduleRemove(interaction)
 		case commandStateClear:
@@ -197,6 +203,90 @@ func (s *Service) handleSendNow(interaction *discordgo.InteractionCreate) error 
 	}
 
 	return s.respondEmbeds(interaction.Interaction, fmt.Sprintf("Sent the embed to <@%s>.", deliveryConfig.UserID), []*discordgo.MessageEmbed{embed})
+}
+
+func (s *Service) handleReminderResend(interaction *discordgo.InteractionCreate) error {
+	options := optionsByName(interaction.ApplicationCommandData().Options)
+
+	deliveryID := requiredString(options, "id")
+	reminderID := requiredString(options, "reminder_id")
+	dueDate := optionalString(options, "due_date")
+
+	cfg, err := s.configStore.Load()
+	if err != nil {
+		return err
+	}
+
+	deliveryGroup, found := findDeliveryByID(cfg.Deliveries, deliveryID)
+	if !found {
+		return userFacingError{message: fmt.Sprintf("Delivery %q was not found in the config.", deliveryID)}
+	}
+
+	if strings.TrimSpace(deliveryGroup.DueDate) == "" || len(deliveryGroup.Reminders) == 0 {
+		return userFacingError{message: "Manual resend only supports reminder-based delivery groups."}
+	}
+
+	reminder, found := deliveryGroup.ReminderByID(reminderID)
+	if !found {
+		return userFacingError{message: fmt.Sprintf("Reminder %q was not found under delivery %q.", reminderID, deliveryID)}
+	}
+
+	location, err := time.LoadLocation(cfg.Runtime.Timezone)
+	if err != nil {
+		return err
+	}
+
+	if dueDate != "" {
+		if _, err := time.ParseInLocation("2006-01-02", dueDate, location); err != nil {
+			return userFacingError{message: "due_date must use YYYY-MM-DD format."}
+		}
+	} else {
+		if frequencyLabel(deliveryGroup.Frequency) != "once" {
+			return userFacingError{message: "due_date is required when manually resending a recurring delivery."}
+		}
+		dueDate = deliveryGroup.DueDate
+	}
+
+	if _, err := delivery.EnsureUserInAnyGuild(s.session, cfg.Discord.GuildIDs, deliveryGroup.UserID); err != nil {
+		return userFacingError{message: fmt.Sprintf("<@%s> is not a member of any configured guild.", deliveryGroup.UserID)}
+	}
+
+	now := time.Now().In(location)
+	resendDelivery := config.ScheduledDelivery{
+		DeliveryID:    deliveryGroup.ID,
+		UserID:        deliveryGroup.UserID,
+		Value:         deliveryGroup.Value,
+		Message:       reminder.Message,
+		ScheduledAt:   now,
+		Date:          now.Format("2006-01-02"),
+		Time:          now.Format("15:04"),
+		DueDate:       dueDate,
+		DueTime:       deliveryGroup.DueTime,
+		Frequency:     frequencyLabel(deliveryGroup.Frequency),
+		ReminderID:    reminder.ID,
+		ReminderName:  reminder.Name,
+		Title:         reminder.Title,
+		DaysBeforeDue: reminder.DaysBeforeDue,
+	}
+
+	message := resendDelivery.RenderMessage(cfg.Embed.DescriptionTemplate)
+	embed, err := delivery.BuildDeliveryEmbed(s.session, cfg, resendDelivery, message, now)
+	if err != nil {
+		return err
+	}
+
+	if err := delivery.SendEmbedDM(s.session, resendDelivery.UserID, embed); err != nil {
+		return userFacingError{message: fmt.Sprintf("I could not DM <@%s> with the manual resend.", resendDelivery.UserID)}
+	}
+
+	if cfg.Discord.AdminChannelID != "" {
+		content := fmt.Sprintf("Manual resend to %s | Reminder: %s | Due: %s", resendDelivery.UserMention(), valueOrFallback(resendDelivery.ReminderName, reminderID), resendDelivery.DueDisplay())
+		if err := admin.SendMessage(s.session, cfg.Discord.AdminChannelID, content, embed, nil); err != nil {
+			s.logger.Printf("send admin manual resend status failed: %v", err)
+		}
+	}
+
+	return s.respondEmbeds(interaction.Interaction, fmt.Sprintf("Manually resent the %s reminder to <@%s>.", valueOrFallback(resendDelivery.ReminderName, reminderID), resendDelivery.UserID), []*discordgo.MessageEmbed{embed})
 }
 
 func (s *Service) handleScheduleAdd(interaction *discordgo.InteractionCreate) error {
@@ -329,6 +419,20 @@ func (s *Service) handleScheduleView(interaction *discordgo.InteractionCreate) e
 	}
 
 	embeds, err := buildScheduleEmbeds(cfg, filterID)
+	if err != nil {
+		return err
+	}
+
+	return s.respondEmbeds(interaction.Interaction, "", embeds)
+}
+
+func (s *Service) handleScheduleListIDs(interaction *discordgo.InteractionCreate) error {
+	cfg, err := s.configStore.Load()
+	if err != nil {
+		return err
+	}
+
+	embeds, err := buildScheduleIDEmbeds(cfg)
 	if err != nil {
 		return err
 	}
@@ -737,6 +841,37 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 			},
 		},
 		{
+			Name:         commandReminderResend,
+			Description:  "Manually resend a configured reminder now.",
+			DMPermission: &dmPermission,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "id",
+					Description: "Existing delivery id to resend a reminder from.",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reminder_id",
+					Description: "Reminder to resend now.",
+					Required:    true,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "initial", Value: "initial"},
+						{Name: "final", Value: "final"},
+						{Name: "due", Value: "due"},
+						{Name: "late", Value: "late"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "due_date",
+					Description: "Optional due date in YYYY-MM-DD format. Required for recurring deliveries.",
+					Required:    false,
+				},
+			},
+		},
+		{
 			Name:         commandScheduleAdd,
 			Description:  "Add a payment schedule with initial and final reminders.",
 			DMPermission: &dmPermission,
@@ -970,6 +1105,11 @@ func applicationCommands() []*discordgo.ApplicationCommand {
 			},
 		},
 		{
+			Name:         commandScheduleListIDs,
+			Description:  "List configured delivery ids for quick admin reference.",
+			DMPermission: &dmPermission,
+		},
+		{
 			Name:         commandStateClear,
 			Description:  "Clear saved delivery state so a schedule or reminder can be sent again.",
 			DMPermission: &dmPermission,
@@ -1180,6 +1320,75 @@ func buildScheduleEmbeds(cfg *config.Config, filterID string) ([]*discordgo.Mess
 	return embeds, nil
 }
 
+func buildScheduleIDEmbeds(cfg *config.Config) ([]*discordgo.MessageEmbed, error) {
+	color, err := config.ParseHexColor(cfg.Embed.Color)
+	if err != nil {
+		return nil, err
+	}
+
+	embeds := []*discordgo.MessageEmbed{
+		{
+			Title:       "Configured Delivery IDs",
+			Description: fmt.Sprintf("Total delivery groups: `%d`", len(cfg.Deliveries)),
+			Color:       color,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	if len(cfg.Deliveries) == 0 {
+		embeds[0].Fields = append(embeds[0].Fields, &discordgo.MessageEmbedField{
+			Name:   "Schedules",
+			Value:  "No delivery groups are currently configured.",
+			Inline: false,
+		})
+		return embeds, nil
+	}
+
+	maxVisibleDeliveries := (maxScheduleEmbeds - 1) * maxFieldsPerEmbed
+	displayGroups := cfg.Deliveries
+	truncated := false
+	if len(displayGroups) > maxVisibleDeliveries {
+		displayGroups = displayGroups[:maxVisibleDeliveries]
+		truncated = true
+	}
+
+	totalPages := (len(displayGroups) + maxFieldsPerEmbed - 1) / maxFieldsPerEmbed
+	for page := 0; page < totalPages; page++ {
+		start := page * maxFieldsPerEmbed
+		end := start + maxFieldsPerEmbed
+		if end > len(displayGroups) {
+			end = len(displayGroups)
+		}
+
+		pageEmbed := &discordgo.MessageEmbed{
+			Title:     fmt.Sprintf("Schedule IDs %d/%d", page+1, totalPages),
+			Color:     color,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		for index, deliveryConfig := range displayGroups[start:end] {
+			pageEmbed.Fields = append(pageEmbed.Fields, &discordgo.MessageEmbedField{
+				Name:   fmt.Sprintf("%d. %s", start+index+1, trimForField(displayDeliveryLabel(deliveryConfig, start+index), 240)),
+				Value:  trimForField(strings.Join(scheduleGroupSummaryLines(deliveryConfig), "\n"), 1024),
+				Inline: false,
+			})
+		}
+
+		embeds = append(embeds, pageEmbed)
+	}
+
+	if truncated {
+		lastEmbed := embeds[len(embeds)-1]
+		lastEmbed.Fields = append(lastEmbed.Fields, &discordgo.MessageEmbedField{
+			Name:   "More Deliveries",
+			Value:  fmt.Sprintf("Only the first %d delivery groups are shown in this response.", maxVisibleDeliveries),
+			Inline: false,
+		})
+	}
+
+	return embeds, nil
+}
+
 func optionsByName(options []*discordgo.ApplicationCommandInteractionDataOption) map[string]*discordgo.ApplicationCommandInteractionDataOption {
 	optionMap := make(map[string]*discordgo.ApplicationCommandInteractionDataOption, len(options))
 	for _, option := range options {
@@ -1328,6 +1537,51 @@ func valueOrFallback(value, fallback string) string {
 	}
 
 	return value
+}
+
+func displayDeliveryLabel(deliveryConfig config.Delivery, index int) string {
+	if strings.TrimSpace(deliveryConfig.ID) != "" {
+		return deliveryConfig.ID
+	}
+	if strings.TrimSpace(deliveryConfig.DueDate) != "" {
+		return fmt.Sprintf("(no id) user:%s due:%s #%d", deliveryConfig.UserID, deliveryConfig.DueDate, index+1)
+	}
+	return fmt.Sprintf("(no id) user:%s at:%s %s #%d", deliveryConfig.UserID, deliveryConfig.Date, deliveryConfig.Time, index+1)
+}
+
+func scheduleGroupSummaryLines(deliveryConfig config.Delivery) []string {
+	lines := []string{
+		fmt.Sprintf("User: <@%s>", deliveryConfig.UserID),
+		fmt.Sprintf("Value: `%s`", deliveryConfig.Value),
+	}
+
+	if deliveryConfig.DueDate != "" {
+		lines = append(lines,
+			fmt.Sprintf("Payment Due: %s", dueLine(deliveryConfig)),
+			fmt.Sprintf("Frequency: %s", frequencyLabel(deliveryConfig.Frequency)),
+		)
+	} else {
+		lines = append(lines,
+			fmt.Sprintf("When: %s %s", deliveryConfig.Date, deliveryConfig.Time),
+			fmt.Sprintf("Custom Description: %s", boolLabel(deliveryConfig.Message != "")),
+		)
+	}
+
+	if len(deliveryConfig.Reminders) > 0 {
+		reminderLines := make([]string, 0, len(deliveryConfig.Reminders))
+		for _, reminder := range deliveryConfig.Reminders {
+			line := valueOrFallback(reminder.ID, reminder.Name)
+			if reminder.ManualOnly() {
+				line += " (manual)"
+			} else {
+				line += fmt.Sprintf(" - %d days before at %s", reminder.DaysBeforeDue, reminder.Time)
+			}
+			reminderLines = append(reminderLines, line)
+		}
+		lines = append(lines, "Reminders: "+strings.Join(reminderLines, "\n"))
+	}
+
+	return lines
 }
 
 func dueLine(deliveryConfig config.Delivery) string {

@@ -17,6 +17,7 @@ This folder holds the planning and operating notes for the Discord DM bot.
 - The bot can post admin status messages to `discord.admin_channel_id`.
 - The running bot also posts an admin message when it detects and applies config changes from disk.
 - `./bin/discord-dm-bot --check-config` validates the TOML file without starting the bot.
+- Admin slash commands now include manual reminder resend, delivery ID listing, schedule removal, and saved-state clearing helpers.
 
 ## Recommended deployment pattern
 
